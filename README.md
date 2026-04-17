@@ -1,31 +1,76 @@
-# 🏛️ AI Museum Tagging Workflow
+# 🏛️ AI Museum Tagger: Dokumentation
 
-Dieses Projekt bietet eine automatisierte Pipeline zur **ethisch sensiblen und laienverständlichen Verschlagwortung** von Museumsobjekten. Durch eine vierstufige KI-Kette (Chain of Verification) werden historische Metadaten und Bildanalysen kombiniert, gegen dekoloniale Biases geprüft und mit der **Gemeinsamen Normdatei (GND)** verknüpft.
+## 1. Beschreibung der Architektur-Idee und des Ziels
+Die Grundidee dieses Projekts ist die Schaffung einer **„Decolonial Middleware“** für Museen. Ziel ist es, historische Objektdaten, die oft von Experten-Jargon und kolonialen Biases geprägt sind, automatisiert in eine moderne, laienverständliche und ethisch sensible Sprache zu transformieren. 
+
+Die Architektur folgt dem Prinzip einer **„Chain of Verification“**: Anstatt einem einzelnen KI-Aufruf zu vertrauen, durchlaufen die Daten eine Kette von spezialisierten LLM-Instanzen (Captioning, Generation, Audit), die sich gegenseitig kontrollieren. Das Ergebnis ist eine hochwertige Verschlagwortung, die sowohl fachlich fundiert (GND-konform) als auch für die breite Öffentlichkeit (Folksonomie-Ansatz) zugänglich ist.
+
+## 2. Voraussetzungen technisch & System-Versionen
+Das System wurde auf folgenden Versionen erfolgreich getestet und dokumentiert:
+
+* **n8n:** Version **2.16.1** (Self-hosted via Docker).
+* **SeaTable:** **Enterprise Edition 6.0.10**.
+* **Elasticsearch:** Version **8.13** (Dient als Vektor- und Suchdatenbank für Normdaten).
+* **GND-Bestand:** Datenstand vom **10.04.2026** (Importiert in den Elasticsearch-Index).
+* **KI-Schnittstellen:** Zugriff auf LLMs (z. B. via OpenRouter) für Gemini 2.5 Pro/Flash.
+
+## 3. Self-Hosting & Infrastruktur
+Für einen stabilen Betrieb der Batch-Verarbeitung und des Elasticsearch-Index wird folgendes Setup empfohlen:
+
+* **Hardware:** VPS (z. B. Hetzner CX43) mit 8 vCPU, 16 GB RAM und 80 GB lokaler Disk.
+* **Deployment:** Betrieb aller Module in 3 Docker-Containern (n8n, SeaTable, Elasticsearch) auf einem gemeinsamen Host.
+
+## 4. Aufbau der Pipeline (SeaTable, n8n, Elasticsearch)
+Die Pipeline verbindet drei spezialisierte Ebenen zu einem modularen Stack:
+* **SeaTable** dient als primäre Datenquelle (Metadaten) und Zielspeicher für die generierten Resultate.
+* **n8n** orchestriert den Prozess, bereitet Daten via JavaScript auf und steuert die spezialisierten LLM-Phasen.
+* **Elasticsearch** ermöglicht dem AI Agenten den Echtzeit-Abgleich der Schlagworte mit der Gemeinsamen Normdatei (GND).
 
 ---
 
-## 🛰️ System-Architektur
+## 5. Beschreibung der Komponenten
 
-Das System ist modular aufgebaut und verteilt die Last auf drei spezialisierte n8n-Workflows:
+### 5.1. SeaTable - Spalten und Daten
+Zur Erleichterung des Setups können die Spaltenköpfe als CSV importiert werden. Die Spaltentypen müssen danach manuell angepasst werden.
 
-```mermaid
-graph TD
-    subgraph "Level 1: Orchestrierung (Tagging_2)"
-        T1[Schedule Trigger] --> S1[SeaTable: Fetch Metadata]
-        S1 --> P1[Single Item Picker & Cleaner]
-    end
+**Quelltabelle (`metadata`):**
+* **Inv Nr**: Text (Eindeutiger Primärschlüssel).
+* **processed**: Text (Status-Flag; der Workflow sucht nach Zeilen, in denen dieser Wert nicht „ok“ ist).
+* **Bildlink**: URL zum Objektbild.
+* **Titel / Beschreibung**: Textfelder mit historischen Kontextinformationen.
 
-    subgraph "Level 2: Die Intelligenz (Tagging_Sub2)"
-        P1 --> L1[LLM 1: Forensischer Befund]
-        L1 --> L2[LLM 2: Kustos-Generator]
-        L2 --> L3[LLM 3: Senior-Audit]
-        L3 --> DB[De-Bias & Flattening]
-    end
+**Zieltabelle (`tags_gemini_2.5_pro`):**
+* **cluster**: Einzelauswahl (z. B. Objekttyp, Thema, Emotion, Form).
+* **schlagwort**: Das final validierte Schlagwort.
+* **status**: Einzelauswahl (green, yellow, red) basierend auf dem Audit-Urteil.
+* **gnd_id / gnd_name**: Die verifizierten Normdaten aus der GND.
+* **llm2 bis llm4**: Textfelder zur Speicherung der Begründungskette (Data Lineage).
+* **audit1 bis audit5**: Detaillierte Audit-Logs zur dekolonialen Prüfung.
 
-    subgraph "Level 3: Die Normierung (Tagging_sub)"
-        DB --> AG[AI Agent: GND Referee]
-        AG <--> ES[(Elasticsearch: GND Index)]
-    end
+### 5.2. n8n - Beschreibung der Verarbeitungsschritte
 
-    AG --> S2[SeaTable: Write Results & Row Link]
-    S2 --> W1[Wait & Loop]
+* **5.2.1. Import und Splitting**: Der Workflow `Tagging_2` ruft unbearbeitete Daten ab und isoliert via Code-Node genau ein Item pro Durchlauf.
+* **5.2.2. Bildbeschreibung (Captioning)**: Im Sub-Workflow `Tagging_Sub2` erstellt LLM 1 einen rein objektiven visuellen Befund („Ground Truth“).
+* **5.2.3. Erstellung von Keywords**: LLM 2 generiert Schlagworte in 11 Clustern unter Berücksichtigung des „Folksonomie-Gebots“ (Brückenschlag zur Alltagssprache).
+* **5.2.4. Judge LLM**: LLM 3 (Senior Auditor) prüft die Ergebnisse auf museologische Regeln wie Singular-Zwang und Material-Verbot.
+* **5.2.5. De:bias**: Ein JavaScript-Node prüft Begriffe gegen eine `DE_BIAS_MAP` und bereinigt koloniale Sprache automatisch.
+* **5.2.6. Weiche**: Trennung der Ergebnisse: Fehlerhafte Begriffe („red“) werden aussortiert; valide Begriffe („green/yellow“) werden weiterverarbeitet.
+* **5.2.7. GND Validierung (Subflow)**: Der Workflow `Tagging_sub` verarbeitet Schlagworte in Batches von 10 via AI Agent und Elasticsearch.
+* **5.2.8. Zusammenführen**: Ein zentraler Code-Node („Wedding“) harmonisiert alle Datenstränge (GND-Treffer und Audit-Ergebnisse).
+* **5.2.9. Zurückschreiben**: Das System erzeugt für jedes Schlagwort eine Zeile in SeaTable, verknüpft diese via `parent_id` und setzt den Status des Objekts auf „ok“.
+
+### 5.3. SeaTable Resultat
+Das Endergebnis ist eine flache, auditierbare Liste. Zu jedem Schlagwort existiert eine lückenlose „Data Lineage“ sowie ein fünfstufiges dekoloniales Audit-Protokoll.
+
+## 6. Potential für Weiterentwicklung
+* **6.1. Open Source Modelle**: Umstellung der LLM-Nodes auf lokale Modelle (z. B. via Ollama) für volle Datensouveränität.
+* **6.2. Weiteres Vokabular**: Integration zusätzlicher Wörterbücher im De-bias-Node für weitere Diskriminierungsformen.
+
+## 7. Variablen & Anpassung (Customization)
+Das System lässt sich flexibel an verschiedene museale Kontexte anpassen:
+
+* **7.1. Daten in SeaTable**: Spaltennamen und Tabellen-IDs können in den n8n-Nodes global angepasst werden.
+* **7.2. Bildbeschreibung**: Der System-Prompt in `01_captions` kann verändert werden, um den Fokus der Analyse zu verschieben.
+* **7.3. Keyword-Prompt**: Modifikation der 11 Cluster-Definitionen im Node `02_keywords`.
+* **7.4. Judge-Anpassung**: Ergänzung neuer Audit-Regeln im System-Prompt von `03_evaluation`.
+* **7.5. GND Agent**: Der AI Agent in `Tagging_sub` kann um Werkzeuge für weitere Normvokabulare ergänzt werden.
