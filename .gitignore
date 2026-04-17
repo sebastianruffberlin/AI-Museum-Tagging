@@ -1,0 +1,11 @@
+# System files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Office temp files
+~$*
+
+# Falls du mal lokale Test-Exporte machst, die nicht ins Repo sollen
+*_test.json
+*.local
