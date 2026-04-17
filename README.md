@@ -1,5 +1,14 @@
-# AI-Museum-Tagging
-Eine automatisierte Pipeline zur dekolonialen und laiensprachlichen Verschlagwortung von Museumsobjekten. Sie nutzt eine dreistufige LLM-Kette (Captioning, Generation, Audit) und verifiziert Ergebnisse gegen die Gemeinsame Normdatei (GND).
+# 🏛️ Decolonial Museum Tagger
+
+Dieses Projekt bietet eine automatisierte Pipeline zur **ethisch sensiblen und laienverständlichen Verschlagwortung** von Museumsobjekten. Durch eine vierstufige KI-Kette (Chain of Verification) werden historische Metadaten und Bildanalysen kombiniert, gegen dekoloniale Biases geprüft und mit der **Gemeinsamen Normdatei (GND)** verknüpft.
+
+---
+
+## 🛰️ System-Architektur
+
+Das System ist modular aufgebaut und verteilt die Last auf drei spezialisierte n8n-Workflows:
+
+```mermaid
 graph TD
     subgraph "Level 1: Orchestrierung (Tagging_2)"
         T1[Schedule Trigger] --> S1[SeaTable: Fetch Metadata]
@@ -10,10 +19,11 @@ graph TD
         P1 --> L1[LLM 1: Forensischer Befund]
         L1 --> L2[LLM 2: Kustos-Generator]
         L2 --> L3[LLM 3: Senior-Audit]
+        L3 --> DB[De-Bias & Flattening]
     end
 
     subgraph "Level 3: Die Normierung (Tagging_sub)"
-        L3 --> AG[AI Agent: GND Referee]
+        DB --> AG[AI Agent: GND Referee]
         AG <--> ES[(Elasticsearch: GND Index)]
     end
 
