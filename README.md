@@ -19,18 +19,35 @@ Das System wurde auf folgenden Versionen erfolgreich getestet und dokumentiert (
 ---
 
 ## 3. Self-Hosting & Infrastruktur
-Das System läuft vollständig isoliert in **3 Docker-Containern** auf einem gemeinsamen VPS-Host. Dies gewährleistet Datensouveränität und eine performante Verarbeitung großer Batches.
 
-**Hardware-Spezifikationen (Empfohlenes Setup):**
+Das System läuft vollständig isoliert in **3 Docker-Containern** (orchestriert via Docker Compose) auf einem gemeinsamen VPS-Host. Dieser Aufbau gewährleistet maximale Datensouveränität und eine performante Verarbeitung großer Batches.
+
+### Hardware-Spezifikationen (Empfohlenes Setup)
 * **VPS:** Hetzner CX43
-* **CPU:** 8 vCPU
+* **CPU:** 8 vCPU (optimiert für parallele LLM-Reasoning-Tasks)
 * **RAM:** 16 GB RAM
-* **Disk:** 80 GB lokale Disk
+* **Disk:** 80 GB lokale NVMe-Disk
 
-**Container-Struktur:**
-1. **n8n:** Orchestrierung, JavaScript-Logik und API-Management.
-2. **SeaTable:** Lokale Instanz für Datenmanagement und Workflow-Steuerung.
-3. **Elasticsearch:** Indexierung und Bereitstellung der GND-Normdaten.
+### Container-Struktur & Ressourcen-Snapshot
+Die folgende Tabelle zeigt die reale Auslastung im produktiven Betrieb (Stand April 2026):
+
+| Dienst | Rolle & Aufgabe | RAM Usage (Live) | CPU Load |
+| :--- | :--- | :--- | :--- |
+| **n8n** | Orchestrierung, JS-Logik & API-Management | ~523 MiB | 0.42% |
+| **SeaTable** | Datenmanagement & Workflow-Steuerung | ~1.43 GiB | 3.51% |
+| **Elasticsearch** | Indexierung & Bereitstellung der GND-Daten | ~1.54 GiB | 0.71% |
+| **Gesamtsystem** | **Host-Integrität** | **~4.1 GiB / 15 GiB** | **0.13 (Idle)** |
+
+### Speicherbelegung (Disk Footprint)
+* **Gesamtbelegung:** 46 GB von 75 GB genutzt (64%).
+* **n8n Data:** 5.4 GB (inkl. vollständiger Execution-History).
+* **GND Index:** 37.5 MB (hochperformanter In-Memory-Index).
+
+### 🔍 Details zum GND-Index (Elasticsearch)
+Der lokale Normdaten-Index ist auf minimale Latenz und maximale Relevanz optimiert:
+* **Einträge:** 207.505 Dokumente.
+* **Umfang:** Enthält **ausschließlich Sachschlagworte** (Subject Headings). 
+* **Einschränkung:** Namen (Personen), Geografika oder andere Entitäten wurden bewusst nicht indiziert, um die Treffergenauigkeit bei der Objekt-Verschlagwortung zu maximieren und den Speicherbedarf gering zu halten.
 
 ---
 
