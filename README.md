@@ -1,4 +1,4 @@
-# 🏛️ Decolonial Museum Tagger
+# 🏛️ AI Museum Tagging Workflow
 
 Dieses Projekt bietet eine automatisierte Pipeline zur **ethisch sensiblen und laienverständlichen Verschlagwortung** von Museumsobjekten. Durch eine vierstufige KI-Kette (Chain of Verification) werden historische Metadaten und Bildanalysen kombiniert, gegen dekoloniale Biases geprüft und mit der **Gemeinsamen Normdatei (GND)** verknüpft.
 
