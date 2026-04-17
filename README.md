@@ -1,109 +1,108 @@
-# 🏛️ AI Museum Tagger: Dokumentation
+# AI Museum Tagger: Dokumentation
 
-## 1. Beschreibung der Architektur-Idee und des Ziels
-Die Grundidee dieses Projekts ist die Schaffung einer **Middleware** für Museen. Ziel ist es, historische Objektdaten, die oft von Experten-Jargon und kolonialen Biases geprägt sind, automatisiert in eine moderne, laienverständliche und ethisch sensible Sprache zu transformieren. 
+## 1. Projektziel und Ansatz
+Dieses Projekt stellt eine **Middleware** für Museen bereit. Sie dient der automatisierten Transformation historischer Objektdaten in eine zeitgemäße, barrierearme und ethisch geprüfte Sprache. 
 
-Die Architektur folgt dem Prinzip einer **„Chain of Verification“**: Anstatt einem einzelnen KI-Aufruf zu vertrauen, durchlaufen die Daten eine Kette von spezialisierten LLM-Instanzen (Captioning, Generation, Audit), die sich gegenseitig kontrollieren. Das Ergebnis ist eine hochwertige Verschlagwortung, die sowohl fachlich fundiert (**GND-konform**) als auch für die breite Öffentlichkeit (**Folksonomie-Ansatz**) zugänglich ist.
+Der Prozess basiert auf einer **„Chain of Verification“**: Daten durchlaufen eine Sequenz spezialisierter LLM-Instanzen (Analyse, Generierung, Audit), um eine gegenseitige Validierung zu gewährleisten. Das System liefert eine Verschlagwortung, die sowohl **GND-konform** (Gemeinsame Normdatei) als auch nach dem **Folksonomie-Prinzip** (nutzerorientiert) aufgebaut ist.
 
 ---
 
-## 2. Voraussetzungen technisch & System-Versionen
-Das System wurde auf folgenden Versionen erfolgreich getestet und dokumentiert (Stand: April 2026):
+## 2. Technische Voraussetzungen und Versionen
+Das System wurde mit folgenden Komponenten getestet (Stand: April 2026):
 
 * **n8n:** Version **2.16.1** (Self-hosted via Docker).
 * **SeaTable:** **Enterprise Edition 6.0.10**.
 * **Elasticsearch:** Version **8.13** (Vektor- und Suchdatenbank für Normdaten).
-* **GND-Bestand:** Datenstand vom **10.04.2026** (Importiert in Elasticsearch).
-* **KI-Schnittstellen:** Zugriff auf LLMs (z. B. via OpenRouter) für **Gemini 2.5 Pro/Flash**.
+* **GND-Datenbestand:** Stand **10.04.2026**.
+* **KI-Modelle:** **Gemini 2.5 Pro/Flash** (Anbindung via OpenRouter).
 
 ---
 
-## 3. Self-Hosting & Infrastruktur
+## 3. Infrastruktur und Deployment
+Das System wird als Multi-Container-Setup (3 Instanzen via Docker Compose) auf einem VPS betrieben.
 
-Das System läuft vollständig isoliert in **3 Docker-Containern** (orchestriert via Docker Compose) auf einem gemeinsamen VPS-Host. Dieser Aufbau gewährleistet maximale Datensouveränität und eine performante Verarbeitung großer Batches.
+### Hardware-Spezifikationen (Empfehlung)
+* **VPS:** 8 vCPU (optimiert für parallele Reasoning-Tasks).
+* **RAM:** 16 GB.
+* **Speicher:** 80 GB NVMe.
 
-### Hardware-Spezifikationen (Empfohlenes Setup)
-* **VPS:** Hetzner CX43
-* **CPU:** 8 vCPU (optimiert für parallele LLM-Reasoning-Tasks)
-* **RAM:** 16 GB RAM
-* **Disk:** 80 GB lokale NVMe-Disk
-
-### Container-Struktur & Ressourcen-Snapshot
-Die folgende Tabelle zeigt die reale Auslastung im produktiven Betrieb (Stand April 2026):
-
-| Dienst | Rolle & Aufgabe | RAM Usage (Live) | CPU Load |
+### Systemauslastung (Betriebswerte)
+| Dienst | Funktion | RAM-Nutzung | CPU-Last |
 | :--- | :--- | :--- | :--- |
-| **n8n** | Orchestrierung, JS-Logik & API-Management | ~523 MiB | 0.42% |
-| **SeaTable** | Datenmanagement & Workflow-Steuerung | ~1.43 GiB | 3.51% |
-| **Elasticsearch** | Indexierung & Bereitstellung der GND-Daten | ~1.54 GiB | 0.71% |
-| **Gesamtsystem** | **Host-Integrität** | **~4.1 GiB / 15 GiB** | **0.13 (Idle)** |
-
-### Speicherbelegung (Disk Footprint)
-* **Gesamtbelegung:** 46 GB von 75 GB genutzt (64%).
-* **n8n Data:** 5.4 GB (inkl. vollständiger Execution-History).
-* **GND Index:** 37.5 MB (hochperformanter In-Memory-Index).
-
-### 🔍 Details zum GND-Index (Elasticsearch)
-Der lokale Normdaten-Index ist auf minimale Latenz und maximale Relevanz optimiert:
-* **Einträge:** 207.505 Dokumente.
-* **Umfang:** Enthält **ausschließlich Sachschlagworte** (Subject Headings). 
-* **Einschränkung:** Namen (Personen), Geografika oder andere Entitäten wurden bewusst nicht indiziert, um die Treffergenauigkeit bei der Objekt-Verschlagwortung zu maximieren und den Speicherbedarf gering zu halten.
+| **n8n** | Orchestrierung & API-Management | ~523 MiB | 0.42% |
+| **SeaTable** | Datenverwaltung & Workflow-Steuerung | ~1.43 GiB | 3.51% |
+| **Elasticsearch** | Indizierung der GND-Daten | ~1.54 GiB | 0.71% |
+| **Gesamt** | **Host-System** | **~4.1 GiB** | **0.13 (Idle)** |
 
 ---
 
-## 4. Aufbau der Pipeline (SeaTable, n8n, Elasticsearch)
-Die Pipeline verbindet drei spezialisierte Ebenen zu einem modularen Stack:
-* **SeaTable** dient als primäre Datenquelle (Metadaten) und Zielspeicher für die generierten Resultate.
-* **n8n** orchestriert den Prozess, bereitet Daten via JavaScript auf und steuert die spezialisierten LLM-Phasen.
-* **Elasticsearch** ermöglicht dem AI Agenten den Echtzeit-Abgleich der Schlagworte mit der Gemeinsamen Normdatei (GND).
+## 4. Pipeline-Architektur
+Der Stack besteht aus drei Ebenen:
+1. **SeaTable:** Datenquelle für Metadaten und Zielspeicher für Ergebnisse.
+2. **n8n:** Steuerung der Logik, Datenaufbereitung via JavaScript und LLM-Sequenzierung.
+3. **Elasticsearch:** Bereitstellung der Normdaten für den Echtzeit-Abgleich durch den AI-Agenten.
 
 ---
 
-## 5. Beschreibung der Komponenten
+## 5. Repository-Struktur
 
-### 5.1. SeaTable - Spalten und Daten
-Zur Erleichterung des Setups können die Spaltenköpfe als CSV importiert werden. Die Spaltentypen müssen danach manuell angepasst werden.
+    .
+    ├── prompts/                # System- & User-Prompts für LLM-Instanzen
+    │   ├── 01_forensic_caption.md
+    │   ├── 02_kustos_generator.md
+    │   ├── 03_senior_auditor.md
+    │   └── 04_gnd_referee.md
+    ├── workflows/              # n8n Workflow-Exporte (JSON)
+    │   ├── Tagging_Main.json
+    │   └── Tagging_Sub.json
+    ├── templates/              # CSV-Importvorlagen für SeaTable
+    │   ├── metadata_template.csv
+    │   └── results_template.csv
+    ├── docs/                   # Technische Dokumentation
+    │   └── setup_seatable.md
+    └── README.md
 
-**Quelltabelle (`metadata`):**
-* **Inv Nr**: Text (Eindeutiger Primärschlüssel).
-* **processed**: Text (Status-Flag; der Workflow sucht nach Zeilen, in denen dieser Wert nicht „ok“ ist).
+---
+
+## 6. Komponentenbeschreibung
+
+### 6.1. SeaTable Datenstruktur
+Die Tabellen müssen zur korrekten Verarbeitung folgende Felder enthalten:
+
+**Tabelle `metadata` (Eingabe):**
+* **Inv Nr**: Eindeutiger Primärschlüssel.
+* **processed**: Status-Indikator (Workflow verarbeitet Zeilen ungleich „ok“).
 * **Bildlink**: URL zum Objektbild.
-* **Titel / Beschreibung**: Textfelder mit historischen Kontextinformationen.
+* **Titel / Beschreibung**: Historische Kontextdaten.
 
-**Zieltabelle (`tags_gemini_2.5_pro`):**
-* **cluster**: Einzelauswahl (z. B. Objekttyp, Thema, Emotion, Form).
-* **schlagwort**: Das final validierte Schlagwort.
-* **status**: Einzelauswahl (green, yellow, red) basierend auf dem Audit-Urteil.
-* **gnd_id / gnd_name**: Die verifizierten Normdaten aus der GND.
-* **llm2 bis llm4**: Textfelder zur Speicherung der Begründungskette (Data Lineage).
-* **audit1 bis audit5**: Detaillierte Audit-Logs zur dekolonialen Prüfung.
+**Tabelle `tags_gemini_2.5_pro` (Ausgabe):**
+* **cluster**: Klassifizierung (z. B. Objekttyp, Thema, Emotion).
+* **schlagwort**: Validierter Begriff.
+* **status**: Audit-Bewertung (Farbskala: Grün, Gelb, Rot).
+* **gnd_id / gnd_name**: Referenzierte Normdaten.
+* **llm2 bis llm4**: Protokollierung der Zwischenschritte (Data Lineage).
 
-### 5.2. n8n - Beschreibung der Verarbeitungsschritte
-* **5.2.1. Import und Splitting**: Der Workflow `Tagging_2` ruft unbearbeitete Daten ab und isoliert via Code-Node genau ein Item pro Durchlauf.
-* **5.2.2. Bildbeschreibung (Captioning)**: Im Sub-Workflow `Tagging_Sub2` erstellt LLM 1 einen rein objektiven visuellen Befund („Ground Truth“).
-* **5.2.3. Erstellung von Keywords**: LLM 2 generiert Schlagworte in 11 Clustern unter Berücksichtigung des „Folksonomie-Gebots“ (Brückenschlag zur Alltagssprache).
-* **5.2.4. Judge LLM**: LLM 3 (Senior Auditor) prüft die Ergebnisse auf museologische Regeln wie Singular-Zwang und Material-Verbot.
-* **5.2.5. De:bias**: Ein JavaScript-Node prüft Begriffe gegen eine `DE_BIAS_MAP` und bereinigt koloniale Sprache automatisch.
-* **5.2.6. Weiche**: Trennung der Ergebnisse: Fehlerhafte Begriffe („red“) werden aussortiert; valide Begriffe („green/yellow“) werden weiterverarbeitet.
-* **5.2.7. GND Validierung (Subflow)**: Der Workflow `Tagging_sub` verarbeitet Schlagworte in Batches von 10 via AI Agent und Elasticsearch.
-* **5.2.8. Zusammenführen**: Ein zentraler Code-Node („Wedding“) harmonisiert alle Datenstränge (GND-Treffer und Audit-Ergebnisse).
-* **5.2.9. Zurückschreiben**: Das System erzeugt für jedes Schlagwort eine Zeile in SeaTable, verknüpft diese via `parent_id` und setzt den Status des Objekts auf „ok“.
-
-### 5.3. SeaTable Resultat
-Das Endergebnis ist eine flache, auditierbare Liste. Zu jedem Schlagwort existiert eine lückenlose „Data Lineage“ sowie ein fünfstufiges dekoloniales Audit-Protokoll zur Nachvollziehbarkeit der KI-Entscheidungen.
+### 6.2. n8n Verarbeitungsschritte
+1. **Import & Splitting**: Abruf der Daten und Vereinzelung der Datensätze.
+2. **Bildanalyse (Captioning)**: Erstellung eines objektiven visuellen Befunds durch LLM 1.
+3. **Schlagwort-Generierung**: LLM 2 erstellt Keywords in 11 Clustern.
+4. **Validierung (Judge LLM)**: LLM 3 prüft formale Regeln (z. B. Singular-Zwang).
+5. **Bias-Filter**: Automatisierte Bereinigung diskriminierender Begriffe via `DE_BIAS_MAP` (JavaScript).
+6. **Logische Weiche**: Trennung valider und fehlerhafter Datenströme.
+7. **GND-Abgleich**: Batch-Verarbeitung der Schlagworte via AI-Agent gegen Elasticsearch.
+8. **Daten-Aggregation**: Zusammenführung der Audit- und GND-Ergebnisse.
+9. **Export**: Schreiben der Ergebnisse nach SeaTable und Statusaktualisierung.
 
 ---
 
-## 6. Potential für Weiterentwicklung
-* **6.1. Open Source Modelle**: Umstellung der LLM-Nodes auf lokale Modelle (z. B. via Ollama) für volle Datensouveränität.
-* **6.2. Weiteres Vokabular**: Integration zusätzlicher Wörterbücher im De-bias-Node für weitere Diskriminierungsformen.
+## 7. Potential für Weiterentwicklung
+* **Lokale LLMs**: Umstellung auf Modelle via Ollama zur Erhöhung der Datensouveränität.
+* **Erweiterte Wörterbücher**: Ausbau der `DE_BIAS_MAP` zur Erkennung weiterer Diskriminierungsformen.
 
 ---
 
-## 7. Variablen & Anpassung (Customization)
-Das System lässt sich flexibel an verschiedene museale Kontexte anpassen:
-* **7.1. Daten in SeaTable**: Spaltennamen und Tabellen-IDs können in den n8n-Nodes global angepasst werden.
-* **7.2. Bildbeschreibung**: Der System-Prompt in `01_captions` kann verändert werden, um den Fokus der Analyse zu verschieben.
-* **7.3. Keyword-Prompt**: Modifikation der 11 Cluster-Definitionen im Node `02_keywords`.
-* **7.4. Judge-Anpassung**: Ergänzung neuer Audit-Regeln im System-Prompt von `03_evaluation`.
-* **7.5. GND Agent**: Der AI Agent in `Tagging_sub` kann um Werkzeuge für weitere Normvokabulare ergänzt werden.
+## 8. Anpassung (Customization)
+* **Konfiguration**: Spaltennamen und IDs sind global in den n8n-Nodes konfigurierbar.
+* **Analyse-Fokus**: Anpassung des System-Prompts in `01_captions` ändert die Bildbeschreibung.
+* **Klassifizierung**: Die 11 Cluster-Definitionen im Node `02_keywords` sind modifizierbar.
+* **Audit-Regeln**: Erweiterung der Validierungslogik im System-Prompt von `03_evaluation`.
