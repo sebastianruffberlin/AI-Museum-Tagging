@@ -1,7 +1,7 @@
 # 🏛️ AI Museum Tagger: Dokumentation
 
 ## 1. Beschreibung der Architektur-Idee und des Ziels
-Die Grundidee dieses Projekts ist die Schaffung einer **„Decolonial Middleware“** für Museen. Ziel ist es, historische Objektdaten, die oft von Experten-Jargon und kolonialen Biases geprägt sind, automatisiert in eine moderne, laienverständliche und ethisch sensible Sprache zu transformieren. 
+Die Grundidee dieses Projekts ist die Schaffung einer **Middleware** für Museen. Ziel ist es, historische Objektdaten, die oft von Experten-Jargon und kolonialen Biases geprägt sind, automatisiert in eine moderne, laienverständliche und ethisch sensible Sprache zu transformieren. 
 
 Die Architektur folgt dem Prinzip einer **„Chain of Verification“**: Anstatt einem einzelnen KI-Aufruf zu vertrauen, durchlaufen die Daten eine Kette von spezialisierten LLM-Instanzen (Captioning, Generation, Audit), die sich gegenseitig kontrollieren. Das Ergebnis ist eine hochwertige Verschlagwortung, die sowohl fachlich fundiert (**GND-konform**) als auch für die breite Öffentlichkeit (**Folksonomie-Ansatz**) zugänglich ist.
 
