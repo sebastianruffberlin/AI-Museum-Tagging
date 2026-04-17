@@ -2,13 +2,30 @@
 
 ## Konfigurations-Variablen
 > [!TIP]
-> **Technische Konfiguration**
-> * **Modell**: `google/gemini-2.5-pro` (Eingesetzt als AI Agent mit Tool-Nutzung)
-> * **Agent-Modus**: ReAct / Tool-Use (Fähigkeit, aktiv Suchen in Elasticsearch auszuführen)
-> * **Integriertes Tool**: `search_gnd` (Schnittstelle zum lokalen Elasticsearch-Index der Gemeinsamen Normdatei)
-> * **Batch-Größe**: 10 Schlagworte pro Agenten-Lauf zur Performance-Optimierung
+> **Technische Konfiguration & Tool-Logik**
+> * **Modell**: `google/gemini-2.5-pro` (Eingesetzt als AI Agent)
+> * **Agent-Modus**: ReAct / Tool-Use
+> * **Batch-Größe**: 10 Schlagworte pro Agenten-Lauf
 > 
-> *Hinweis: Die Steuerung des Agenten erfolgt direkt über den n8n AI-Agent-Node.*
+> **Elasticsearch Tool-Konfiguration (`search_gnd`)**:
+> Das Tool nutzt eine gewichtete Suche (`multi_match`), um die Relevanz der Treffer zu maximieren:
+> ```json
+> {
+>   "size": 5,
+>   "query": {
+>     "multi_match": {
+>       "query": "{{ $fromAI('suchbegriff') }}",
+>       "fields": [
+>         "preferred_name^4",   // Höchste Priorität: Der exakte Name
+>         "alternate_names^3", // Hohe Priorität: Synonyme
+>         "definition^1"      // Niedrige Priorität: Kontextsuche in der Beschreibung
+>       ],
+>       "fuzziness": "AUTO"
+>     }
+>   }
+> }
+> ```
+> *Hinweis: Die Steuerung erfolgt über den n8n AI-Agent-Node.*
 
 ---
 
