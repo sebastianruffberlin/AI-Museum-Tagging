@@ -1,17 +1,32 @@
-# AI Museum Tagger: Dokumentation
+<div align="center">
+
+# 🏛️ AI Museum Tagger
+
+### Automatisierte, dekoloniale Verschlagwortung von Museumsobjekten
+### via lokaler KI — open source, self-hosted, datensouverän
+
+[![License: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
+[![n8n](https://img.shields.io/badge/n8n-2.27.4-orange)](https://n8n.io)
+[![SeaTable](https://img.shields.io/badge/SeaTable-6.1.8-blue)](https://seatable.io)
+[![llama.cpp](https://img.shields.io/badge/llama.cpp-lokal-green)](https://github.com/ggerganov/llama.cpp)
+[![Stack](https://img.shields.io/badge/GPU-NVIDIA%20L40S-76b900)](https://www.scaleway.com)
+
+</div>
+
+---
 
 > **Version: 2.0 | Stand: 24. Juni 2026**
 > Änderungen gegenüber v1.0: Caption-Pipeline auf parallele Dual-Model-Architektur mit Synthese-Schiedsrichter umgestellt, neuer Repair-Schritt für gelbe Begriffe, LLM3 wechselt von Triage zu Fehlerklassen-System, GND-Abgleich von AI-Agent auf Retrieve-then-Judge umgestellt, alle Modelle von Gemini auf vollständig lokale Open-Source-Modelle (Qwen/Gemma) migriert.
 
 ---
 
-## 1. Projektziel und Ansatz
+## 🎯 Projektziel und Ansatz
 
 Dieses Projekt stellt eine **Middleware** für Museen bereit. Sie dient der automatisierten Transformation historischer Objektdaten in eine zeitgemäße, barrierearme und ethisch geprüfte Sprache.
 
 Das Stadtmuseum Berlin verwaltet 4,5 Millionen Objekte aus 40 Teilsammlungen. Die Dokumentation dieser Objekte ist über Generationen von Museolog:innen gewachsen — sie ist oft undurchsichtig, voller Fachjargon, und für Nicht-Expert:innen kaum durchsuchbar. Dieses System macht diese Sammlung für die breite Öffentlichkeit auffindbar.
 
-### Unser Ansatz: 40 Teilsammlungen, aber nur ein Workflow
+### 40 Teilsammlungen, aber nur ein Workflow
 
 Das System ist bewusst auf **Standardisierung** ausgelegt:
 
@@ -32,7 +47,22 @@ Der Prozess basiert auf einer **„Chain of Verification"**: Daten durchlaufen e
 
 ---
 
-## 2. Technische Voraussetzungen
+## 💶 Kosten & Geschwindigkeit
+
+Das System läuft auf einem Scaleway L40S GPU-Server (On-Demand, Pay-per-Minute). Die Kosten beziehen sich auf die reine GPU-Serverzeit — keine API-Gebühren, keine Daten-Weitergabe.
+
+| Einheit | Zeit | Kosten |
+| :--- | :--- | :--- |
+| 1 Schlagwort | ~12 Sekunden | ~0,5 Ct |
+| 1 Objekt (30 Schlagworte) | ~6 Minuten | ~15 Ct |
+| 100 € Budget | ~68 Stunden | ~20.400 Schlagworte |
+| 1.000 Objekte | ~100 Stunden | ~147 € |
+
+*Basierend auf Scaleway L40S Serverpreisen und gemessener Inferenz-Geschwindigkeit des Stacks, Stand: 24. Juni 2026.*
+
+---
+
+## ⚙️ Technische Voraussetzungen
 
 ### Infrastruktur (Zwei-Server-Setup)
 
@@ -41,29 +71,15 @@ Der Prozess basiert auf einer **„Chain of Verification"**: Daten durchlaufen e
 | **Orchestrierung** | n8n, SeaTable, OpenSearch | Hetzner CPX52 oder vergleichbar (8+ vCPU, 16+ GB RAM) |
 | **KI-Inferenz** | llama.cpp, LiteLLM, llama-swap | GPU-Server mit 48 GB VRAM (z. B. Scaleway L40S) |
 
-Beide Server kommunizieren über HTTPS. Der Inferenz-Endpunkt ist per Firewall ausschließlich für den Orchestrierungs-Server erreichbar. Reverse Proxy (Caddy) übernimmt TLS-Terminierung auf beiden Servern.
+Beide Server kommunizieren über HTTPS. Der Inferenz-Endpunkt ist per Firewall ausschließlich für den Orchestrierungs-Server erreichbar.
 
 ### Software-Stack
 
-**Orchestrierungs-Server:**
-* Ubuntu 24.04 LTS
-* Docker + Docker Compose
-* **n8n** `2.27.4` — Workflow-Orchestrierung
-* **SeaTable Enterprise** `6.1.8` + MariaDB `11.4.3` + Redis `7.2.7` — Datenverwaltung
-* **OpenSearch** `latest` — GND-Normdaten-Datenbank (2 GB Heap)
-* **SearXNG** `latest` — Metasuche (optional)
-* **Caddy** `2.9.2` — Reverse Proxy & TLS
+**Orchestrierungs-Server:** Ubuntu 24.04 · Docker 29.6.0 · n8n `2.27.4` · SeaTable Enterprise `6.1.8` · MariaDB `11.4.3` · Redis `7.2.7` · OpenSearch `latest` · Caddy `2.9.2`
 
-**KI-Inferenz-Server:**
-* Ubuntu 24.04 LTS + NVIDIA Treiber
-* Docker + nvidia-docker
-* **llama-swap** — On-Demand Model-Switcher (max. 1 großes Modell gleichzeitig im VRAM)
-* **LiteLLM** `main-latest` — OpenAI-kompatibler Proxy-Router
-* **llama.cpp** (llama-server) — GGUF-Inferenz-Backend
-* **Caddy** `latest` — Reverse Proxy & IP-Firewall
-* **Ollama** `latest` — optional, für kleine Hilfsmodelle
+**KI-Inferenz-Server:** Ubuntu 24.04 · NVIDIA Driver `580.159.03` · CUDA `13.0` · llama-swap Build `223` · LiteLLM `1.82.6` · Caddy `latest`
 
-### KI-Modelle (aktiv im Workflow)
+### 🤖 KI-Modelle (aktiv im Workflow)
 
 Alle Modelle laufen lokal als GGUF via llama.cpp. Kein Cloud-API-Zugriff erforderlich.
 
@@ -80,22 +96,7 @@ Vollständige Modell-Dokumentation inkl. llama-swap Flags und Download-Links: `d
 
 ---
 
-## 3. Kosten & Geschwindigkeit
-
-Das System läuft auf einem Scaleway L40S GPU-Server (On-Demand, Pay-per-Minute). Die Kosten beziehen sich auf die reine GPU-Serverzeit — keine API-Gebühren, keine Daten-Weitergabe.
-
-| Einheit | Zeit | Kosten |
-| :--- | :--- | :--- |
-| 1 Schlagwort | ~12 Sekunden | ~0,5 Ct |
-| 1 Objekt (30 Schlagworte) | ~6 Minuten | ~15 Ct |
-| 100 € Budget | ~68 Stunden | ~20.400 Schlagworte |
-| 1.000 Objekte | ~100 Stunden | ~147 € |
-
-*Basierend auf Scaleway L40S Serverpreisen und gemessener Inferenz-Geschwindigkeit des Stacks, Stand: 24. Juni 2026.*
-
----
-
-## 4. Pipeline-Architektur
+## 🔄 Pipeline-Architektur
 
 ```
 SeaTable (metadata)
@@ -105,21 +106,21 @@ SeaTable (metadata)
         │
         ▼
 [Tagging_Sub]
-  ├── Phase 1a: Caption A (Qwen3.6-35B) ──┐
-  ├── Phase 1a: Caption B (Gemma-4-31B)  ──┤ parallel
-  │                                         ▼
-  ├── Phase 1b: Synthese LLM1b (Gemma-4-31B) → master_caption
+  ├── Phase 1a: Caption A (Qwen3.6-35B-A3B-MTP-Q4) ──┐
+  ├── Phase 1a: Caption B (Gemma-4-26B-A4B-QAT)     ──┤ parallel
+  │                                                     ▼
+  ├── Phase 1b: Synthese LLM1b (Gemma-4-12B-QAT) → master_caption
   │
-  ├── Phase 2:  Tagging LLM2 (Qwen3.6-27B) → 11 Cluster
+  ├── Phase 2:  Tagging LLM2 (Qwen3.6-27B-MTP) → 11 Cluster
   │
-  ├── Phase 3:  Audit LLM3 (Gemma-4-31B) → Fehlerklassen
+  ├── Phase 3:  Audit LLM3 (Gemma-4-31B-it) → Fehlerklassen
   │                 │
   │           Code: Status aus Fehlerklassen berechnen
   │                 │
   │         ┌───────┴────────┐
   │       Grün             Gelb
   │         │                │
-  │         │     Phase 3b: Repair-Kustos (Gemma-4-12B)
+  │         │     Phase 3b: Repair-Kustos (Gemma-4-12B-QAT)
   │         │                │
   │         │         ┌──────┴──────┐
   │         │      Repariert    Nicht reparierbar
@@ -127,14 +128,14 @@ SeaTable (metadata)
   │         │
   ├── Phase 4:  GND-Abgleich [Tagging_GND]
   │             OpenSearch _msearch → 5 Kandidaten
-  │             LLM4 (Qwen3.6-35B-MTP, Concurrency 8)
+  │             LLM4 (Qwen3.6-35B-A3B-MTP, Concurrency 4)
   │
   └── Export → SeaTable (tags_gemini_2.5_pro) + Status-Update
 ```
 
 ---
 
-## 5. Repository-Struktur
+## 📁 Repository-Struktur
 
 ```
 .
@@ -160,9 +161,9 @@ SeaTable (metadata)
 
 ---
 
-## 6. Komponentenbeschreibung
+## 🗄️ Komponentenbeschreibung
 
-### 5.1. SeaTable Datenstruktur
+### SeaTable Datenstruktur
 
 Detaillierte Anleitungen zum Import und zur Konfiguration: `docs/setup_seatable.md`
 
@@ -184,7 +185,7 @@ Detaillierte Anleitungen zum Import und zur Konfiguration: `docs/setup_seatable.
 * **status2** — Protokoll-Status (Open Access / Restricted / Sensitive)
 * **config** — Automatisch befüllte Versions- und Modell-Konfiguration
 
-### 5.2. n8n Verarbeitungsschritte
+### n8n Verarbeitungsschritte
 
 1. **Import & Splitting** — Abruf aus SeaTable, Single-Item-Picking
 2. **Caption A + B (parallel)** — Qwen + Gemma erstellen unabhängige visuelle Befunde
@@ -198,13 +199,11 @@ Detaillierte Anleitungen zum Import und zur Konfiguration: `docs/setup_seatable.
 
 ---
 
-## 7. Einrichtung
+## 🚀 Einrichtung
 
 Dieses Repository kann auf drei Ebenen genutzt werden — je nach vorhandener Infrastruktur:
 
----
-
-### Option 1: Nur die Prompts verwenden
+### Option 1 — Nur die Prompts verwenden
 
 Die System-Prompts in `prompts/` sind unabhängig vom restlichen Stack nutzbar. Sie funktionieren mit jedem OpenAI-kompatiblen LLM-Endpunkt (OpenRouter, OpenAI, lokale Modelle).
 
@@ -212,34 +211,25 @@ Die System-Prompts in `prompts/` sind unabhängig vom restlichen Stack nutzbar. 
 2. System-Prompts in eigene LLM-Calls oder Agenten-Frameworks einbinden
 3. Die 11 Cluster-Definitionen und Audit-Logik sind vollständig dokumentiert
 
----
+### Option 2 — n8n-Workflows mit eigenem Server
 
-### Option 2: n8n-Workflows mit eigenem Server
-
-Die Workflow-JSONs aus `workflows/` sind sofort importierbar und funktionieren mit jedem OpenAI-kompatiblen Endpunkt — egal ob Cloud-API oder eigener Server.
+Die Workflow-JSONs funktionieren mit jedem OpenAI-kompatiblen Endpunkt — egal ob Cloud-API oder eigener Server.
 
 1. SeaTable aufsetzen und Tabellen via CSV-Templates anlegen → `docs/setup_seatable.md`
-2. Die drei JSON-Dateien in n8n importieren (`Tagging_Main.json`, `Tagging_Sub.json`, `Tagging_GND.json`)
-3. Platzhalter in den Workflows ersetzen:
-   - `YOUR_LLM_ENDPOINT` → eigener LLM-Endpunkt
-   - `YOUR_API_KEY` → eigener API-Key
-   - `YOUR_SEATABLE_CREDENTIAL_ID` → SeaTable API-Token
-4. GND-Sachbegriffe in OpenSearch indexieren (Dump der DNB, Import-Script liegt bei)
+2. Die drei JSON-Dateien in n8n importieren
+3. Platzhalter ersetzen: `YOUR_LLM_ENDPOINT`, `YOUR_API_KEY`, `YOUR_SEATABLE_CREDENTIAL_ID`
+4. GND-Sachbegriffe in OpenSearch indexieren (Dump der DNB)
 
----
+### Option 3 — Vollständigen Stack nachbauen
 
-### Option 3: Vollständigen Stack nachbauen
+Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann gemäß `docs/stack_setup.md` nachgebaut werden. Empfohlen für Museen die Datensouveränität und volle Kontrolle wollen.
 
-Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann gemäß `docs/stack_setup.md` nachgebaut werden. Das ist die empfohlene Option für Museen die Datensouveränität und volle Kontrolle wollen.
-
-1. `docs/stack_setup.md` lesen — alle Versionen, Configs und Modell-Links sind dokumentiert
+1. `docs/stack_setup.md` lesen — alle Versionen, Configs und Modell-Links dokumentiert
 2. Hetzner-Server aufsetzen (n8n, SeaTable, OpenSearch, Caddy)
 3. Scaleway GPU-Server aufsetzen (llama-swap, LiteLLM, Caddy)
 4. Modelle herunterladen und in `/opt/ki-inferenz/models/` ablegen
-5. Firewall konfigurieren: Inferenz-Endpunkt nur von Hetzner-IP erreichbar
+5. Firewall konfigurieren: Inferenz-Endpunkt nur von Orchestrierungs-Server erreichbar
 6. Workflows importieren und Platzhalter ersetzen
-
----
 
 ### Anpassung
 
@@ -251,7 +241,7 @@ Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann gemäß `docs/stack_se
 
 ---
 
-## 8. Potenzial für Weiterentwicklung
+## 🔭 Potenzial für Weiterentwicklung
 
 * **One-Click-Deployment** — Docker Compose Paket für Hetzner + Scaleway in Arbeit
 * **Batch-Modus** — Parallele Verarbeitung mehrerer Objekte (setzt mehr VRAM als L40S voraus)
@@ -262,6 +252,6 @@ Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann gemäß `docs/stack_se
 
 ---
 
-## 9. Lizenz
+## 📄 Lizenz
 
 MIT License — siehe `LICENSE`
