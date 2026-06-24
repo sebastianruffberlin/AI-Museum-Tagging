@@ -1,0 +1,334 @@
+{
+  "name": "local_03_V1.2",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "4b620185-0289-4652-aa0e-a92a3ea665a5",
+      "typeVersion": 1.1,
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -656,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// LLM1 BATCHED — parallel über n8n-nativen HTTP-Helper (echte Netzwerkschicht)\nconst items = $input.all();\n\nconst MODEL       = \"qwen3.6-35b-mtp\";                                    // llama-swap-Key!\nconst URL         = \"YOUR_LLM_ENDPOINT/v1/chat/completions\";\nconst AUTH        = \"Bearer YOUR_API_KEY\";\nconst CONCURRENCY = 8;   // == -np\n\nconst buildBody = (j) => ({\n  model: MODEL,\n  response_format: { type: \"json_object\" },\n  messages: [\n    { role: \"system\", content: j.rawSystempromptText },\n    { role: \"user\",   content: j.rawPromptText }\n  ],\n  temperature: 0.1, top_p: 0.8, top_k: 20,\n  presence_penalty: 0.0, frequency_penalty: 0.0,\n  max_tokens: 2048,\n  chat_template_kwargs: { enable_thinking: false },\n});\n\n// Arrow-Funktionen, damit `this` (= n8n-Kontext) erhalten bleibt\nconst callOne = async (j) => {\n  try {\n    const data = await this.helpers.httpRequest({\n      method: 'POST',\n      url: URL,\n      headers: { Authorization: AUTH },\n      body: buildBody(j),\n      json: true,\n      timeout: 600000,\n    });\n    const choice = data?.choices?.[0];\n    const msg    = choice?.message;\n    let content  = msg?.content || \"\";\n    if (!content && msg?.reasoning_content) content = msg.reasoning_content;  // Fallback\n    return {\n      ...j,\n      final_response: content || null,\n      _finish: choice?.finish_reason ?? null,\n      _completion_tokens: data?.usage?.completion_tokens ?? null,\n      _reasoning_len: (msg?.reasoning_content || \"\").length, \n    };\n  } catch (e) {\n    return { ...j, final_response: null, _llm1_error: (e?.message || String(e)).slice(0, 300) };\n  }\n};\n\nconst runPool = async (list, limit) => {\n  const results = new Array(list.length);\n  let idx = 0;\n  const worker = async () => {\n    while (idx < list.length) { const i = idx++; results[i] = await callOne(list[i].json); }\n  };\n  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, worker));\n  return results;\n};\n\nconst out = await runPool(items, CONCURRENCY);\n\n// Diagnose: wenn ALLES fehlschlägt, Node bewusst rot werfen (statt still null)\nif (out.length && out.every(o => o.final_response == null)) {\n  throw new Error('LLM1: kein erfolgreicher Call. Erster Fehler: ' + (out[0]._llm1_error || 'unbekannt'));\n}\n\nreturn out.map((json) => ({ json }));"
+      },
+      "name": "LLM1_batched",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        944
+      ],
+      "id": "72936ee4-9791-4924-bfb6-53c4dcad1cee"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e6beace6-879d-476a-95cd-e309269a1a8b",
+              "name": "gnd_result_raw",
+              "value": "={{ $json.gnd_result_raw }}",
+              "type": "object"
+            },
+            {
+              "id": "1869aa95-1255-4b02-abd9-2803d376f419",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "543156b9-3dd4-4e6f-b39c-962b959db67a",
+              "name": "cluster",
+              "value": "={{ $json.cluster }}",
+              "type": "string"
+            },
+            {
+              "id": "3914e7db-9330-4422-ab57-076a2884776c",
+              "name": "term",
+              "value": "={{ $json.term }}",
+              "type": "string"
+            },
+            {
+              "id": "706fc3d8-47da-48bf-b1c7-0a45438ba092",
+              "name": "why",
+              "value": "={{ $json.why }}",
+              "type": "string"
+            },
+            {
+              "id": "2d1fc14e-d924-4203-ad4e-5f27cf883096",
+              "name": "judge_comment",
+              "value": "={{ $json.judge_comment }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "ignoreConversionErrors": true
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        128,
+        944
+      ],
+      "id": "6e0f6e5d-5bca-415d-ae23-0ad792080659",
+      "name": "Extract_GND_Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c8e7bf0a-9314-4c63-a4cc-fdbc236e31e4",
+              "name": "rawPromptText",
+              "value": "=SACHBEGRIFF-VALIDIERUNG GEGEN VORAUSGEWÄHLTE GND-TREFFER\n\nBEGRIFF ZUR PRÜFUNG: {{ $json.term }}\nCLUSTER: {{ $json.cluster }}\nBEGRÜNDUNG LLM2: {{ $json.why }}\nURTEIL LLM3: {{ $json.judge_comment }}\n\nKONTEXT (NUR zur Disambiguierung):\nCaption: {{ $json.caption }}\nMetadaten: {{ $json.metadata }}\n\nVORAUSGEWÄHLTE GND-KANDIDATEN:\n{{ JSON.stringify($json.gnd_candidates) }}\n\nAUFGABE:\n1. Deskriptiv-Gate prüfen.\n2. Kandidaten anhand \"preferred_name\" und \"definition\" gegen Begriff und Kontext bewerten.\n3. Besten passenden Kandidaten zuordnen, sonst no_match.\nGib nur das finale JSON-Objekt aus.",
+              "type": "string"
+            },
+            {
+              "id": "8c6690b3-b024-458e-a379-5ed4f7ec8146",
+              "name": "rawSystempromptText",
+              "value": "=ARCHIV-LLM — SYSTEM: GND-SACHBEGRIFF-VALIDIERUNG (RETRIEVE-THEN-JUDGE)\n\nI. MANDAT\nDu verifizierst genau EINEN Sachbegriff pro Aufruf gegen eine mitgelieferte Liste\nvon GND-Kandidaten. Du wählst den passenden Kandidaten aus oder lehnst ab.\nCaption, Metadaten und Kontext dienen NUR der Disambiguierung, niemals als\nzusätzlicher Suchauftrag.\n\nII. DESKRIPTIV-GATE (zuerst prüfen)\nRein deskriptive Zustands-/Qualitätsbegriffe (beschädigt, fleckig, vergilbt,\nunscharf, rötlich, abgenutzt o. Ä.) sind kein GND-Fall.\n→ Trifft zu: gnd_id = null, gnd_confidence = \"no_match\",\n  debug_tags = \"DESCRIPTIVE_NO_GND\".\n\nIII. BEWERTUNG DER KANDIDATEN\n- Gehe die mitgelieferten Treffer akribisch durch; prüfe \"preferred_name\" und\n  \"definition\" gegen Begriff und Kontext.\n- Passt ein Kandidat exakt oder semantisch eindeutig → wähle ihn aus.\n- Passt ein Kandidat von der Bedeutung her nicht (Homonym, falsches Konzept) →\n  verwirf ihn (debug_tags: DEFINITION_MISMATCH).\n- Passt KEIN Kandidat → gnd_id = null, gnd_confidence = \"no_match\",\n  debug_tags = \"DEFINITION_MISMATCH\".\n\nIV. HARTE REGELN\n- Es gibt KEIN Werkzeug und KEINE Suche. Entscheide ausschließlich aus den\n  mitgelieferten Kandidaten.\n- Erfinde NIEMALS eine gnd_id, einen preferred_name, alternate_names oder eine\n  definition. Jeder Wert MUSS wörtlich aus einem der mitgelieferten Kandidaten\n  stammen. Kennst du den \"richtigen\" Begriff, der aber nicht in der Liste steht\n  → no_match.\n- Gib AUSSCHLIESSLICH das finale JSON-Objekt aus: kein Reasoning, keine Vorrede\n  oder Nachrede, keine Code-Fences (```), kein Markdown. Die Antwort beginnt\n  mit { und endet mit }.\n\nV. DEBUG-TAGS\nDESCRIPTIVE_NO_GND, DEFINITION_MISMATCH, MULTIPLE_CANDIDATES, LOW_FUZZY_OVERLAP.\nKeine Probleme: NONE.\n\nVI. FINALES SCHEMA (genau ein Begriff; valides JSON, doppelte Anführungszeichen,\nkeine Trailing-Kommas)\n{\n  \"gnd_id\": \"ID aus den Kandidaten oder null\",\n  \"gnd_preferred_name\": \"Name laut Kandidat oder null\",\n  \"gnd_confidence\": \"high | medium | low | no_match\",\n  \"reasoning\": \"kurze Begründung der Zuordnung oder Ablehnung\",\n  \"debug_tags\": \"zutreffende Tags oder NONE\",\n  \"additional_data\": {\n    \"alternate_names\": \"kommaseparierte Synonyme laut Kandidat oder null\",\n    \"definition\": \"Definition laut Kandidat oder null\"\n  }\n}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -496,
+        944
+      ],
+      "id": "22274bfc-ed5b-4c3c-ade0-66a84440c348",
+      "name": "Build_GND_Prompts"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// DATA NORMALIZER: Macht die Daten einheitlich (egal ob Start oder Webhook)\n// =====================================================================\n\nconst data = $input.item.json;\n\n// Wenn 'body' existiert (Webhook), packe es aus. Ansonsten nimm die Daten direkt (Start-Node).\nconst cleanData = data.body ? data.body : data;\n\nreturn {\n  json: cleanData\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        736
+      ],
+      "id": "91c1b6dc-e799-433e-82c4-6d697a510745",
+      "name": "Normalize_Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// CODE-NODE: Flatten — Cluster → ein Item pro Begriff (nach Normalize_Input)\n// =====================================================================\nconst data = $input.item.json;\nconst CLUSTERS = [\"Objekttyp\",\"Thema_Phänomen\",\"Inhalt_Motiv\",\"Funktion_Zweck\",\n  \"Visuelle_Merkmale\",\"Form_Gestalt\",\"Bestandteile\",\"Gebrauchskontext\",\n  \"Kultureller_Kontext\",\"Emotion_Atmosphäre\",\"Farbe_Nuancen\"];\n\nconst caption  = data.caption  || data.Caption  || \"\";\nconst metadata = data.metadata || data.Metadata || data.context_data_string || \"\";\n\nconst out = [];\nlet n = 0;\nfor (const cluster of CLUSTERS) {\n  const arr = Array.isArray(data[cluster]) ? data[cluster] : [];\n  for (const it of arr) {\n    if (!it || !it.term) continue;\n    out.push({ json: {\n      id: String(++n),\n      cluster,\n      term: it.term,\n      why: it.why || \"\",\n      judge_comment: it.judge_comment || \"\",\n      caption,\n      metadata\n    }});\n  }\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        736
+      ],
+      "id": "4462f030-97af-44cd-be2a-769d402ef165",
+      "name": "Flatten_to_Terms"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// CODE-NODE: done-Aggregator — Linear & Flach\n// =====================================================================\nconst items = $input.all();\nconst byCluster = {};\nconst errors = [];\n\nfunction safeParseJson(rawInput) {\n  if (!rawInput) return null;\n  if (typeof rawInput === 'object') return rawInput;\n  try {\n    let cleanString = rawInput.trim();\n    const startIdx = cleanString.indexOf('{');\n    const endIdx = cleanString.lastIndexOf('}');\n    if (startIdx !== -1 && endIdx !== -1) {\n      cleanString = cleanString.substring(startIdx, endIdx + 1);\n      return JSON.parse(cleanString);\n    }\n  } catch (e) {\n    return null;\n  }\n  return null;\n}\n\nfor (const it of items) {\n  const j = it.json;\n  const v = safeParseJson(j.gnd_result_raw);\n\n  const cluster  = (v && v.cluster) || j.cluster || \"Unsorted\";\n  const termName = (v && v.term)    || j.term    || \"N/A\";\n\n  if (!v) {\n    const reason = j._skip === \"empty_llm1\"\n      ? \"LLM1 lieferte keine Antwort (leer/abgeschnitten).\"\n      : \"Parsing-Fehler: Ungültiges JSON.\";\n    errors.push({ id: j.id, term: termName, cluster, reason });\n    (byCluster[cluster] ||= []).push({\n      term:               termName,\n      gnd_name:           null,\n      gnd_id:             null,\n      confidence:         \"no_match\",\n      llm2_rationale:     j.why || \"\",\n      llm3_judge_comment: j.judge_comment || \"\",\n      llm4_reasoning:     reason\n    });\n    continue;\n  }\n\n  (byCluster[cluster] ||= []).push({\n    term:               v.term,\n    gnd_name:           v.gnd_preferred_name ?? null,\n    gnd_id:             v.gnd_id ?? null,\n    confidence:         v.gnd_confidence || \"no_match\",\n    llm2_rationale:     j.why || \"\",\n    llm3_judge_comment: j.judge_comment || \"\",\n    llm4_reasoning:     v.reasoning || \"\"\n  });\n}\n\nreturn [{ json: {\n  gnd_result_string: JSON.stringify(byCluster, null, 2),\n  _error_count: errors.length,\n  _errors: errors\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        944
+      ],
+      "id": "c4f96530-670a-4570-8e70-817b1cba88c7",
+      "name": "Aggregate_GND_Results"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// BATCH RETRIEVAL: Alle Terme auf einmal gegen GND/_msearch\n// =====================================================================\n\nconst items = $input.all();\n\n// _msearch erwartet: pro Anfrage zwei Zeilen (header + body), newline-getrennt\n// header: { \"index\": \"gnd_sachbegriffe\" }\n// body:   { \"size\": 5, \"query\": { ... } }\n\nconst lines = [];\n\nfor (const item of items) {\n  const term = item.json.term;\n\n  // Header-Zeile\n  lines.push(JSON.stringify({ index: \"gnd_sachbegriffe\" }));\n\n  // Query-Zeile – gleiche Felder und Gewichtung wie der bisherige Einzel-Search\n  lines.push(JSON.stringify({\n    size: 5,\n    query: {\n      multi_match: {\n        query: term,\n        fields: [\n          \"preferred_name^5\",\n          \"alternate_names^3\",\n          \"broader_term^2\",\n          \"related_term^1\",\n          \"def^1\"\n        ],\n        fuzziness: \"AUTO\"\n      }\n    },\n    _source: [\"preferred_name\", \"alternate_names\", \"def\", \"gnd_id\"]\n  }));\n}\n\n// _msearch braucht einen abschließenden Newline\nconst msearchBody = lines.join(\"\\n\") + \"\\n\";\n\nreturn [{ json: { msearchBody, items: items.map(i => i.json) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        736
+      ],
+      "id": "90d4c7e5-c629-4c1a-824c-1aeddff7701a",
+      "name": "OpenSearch_Bulk_Prep"
+    },
+    {
+      "parameters": {
+        "url": "YOUR_OPENSEARCH_ENDPOINT/_msearch",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/x-ndjson",
+        "body": "={{ $json.msearchBody }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        128,
+        736
+      ],
+      "id": "cb9c76ff-6ab1-4ad1-9cfc-9bd034e4ccf0",
+      "name": "Call_OpenSearch_Bulk"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// CODE-NODE: Inject_GND_Matches (Die Daten-Brücke nach dem Bulk-Search)\n// =====================================================================\n\n// 1. Hole die rohen Suchergebnisse aus dem OpenSearch-Response\nconst osResponse = $node[\"HTTP Request11\"].json;\nconst searchResponses = osResponse.responses || [];\n\n// 2. Hole die ursprünglichen, flachgeklopften Begriffe aus der vorgelagerten Node\n// (Wir lesen die gemappten Items aus 'Code in JavaScript2')\nconst originalPayload = $('OpenSearch_Bulk_Prep').first().json;\nconst originalItems = originalPayload.items || [];\n\nconst enrichedItems = [];\n\n// 3. Iteriere über die Items und verheirate sie mit den Hits\nfor (let i = 0; i < originalItems.length; i++) {\n  const item = originalItems[i];\n  const osHit = searchResponses[i];\n  \n  // Extrahiere die echten Treffer-Dokumente (wir haben size: 5 gesetzt)\n  const hits = osHit?.hits?.hits || [];\n  \n  // Wir mappen die Hits in ein sauberes, flaches Array für das LLM\n  const gndCandidates = hits.map(h => ({\n    gnd_id: h._source.gnd_id || null,\n    preferred_name: h._source.preferred_name || null,\n    alternate_names: h._source.alternate_names || null,\n    definition: h._source.def || null // 'def' im Index gemappt\n  }));\n\n  // Gib dem Item die Kandidaten mit\n  enrichedItems.push({\n    json: {\n      ...item,\n      gnd_candidates: gndCandidates,\n      has_candidates: gndCandidates.length > 0\n    }\n  });\n}\n\nreturn enrichedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        736
+      ],
+      "id": "5b5a37fa-06a9-47cb-a5d2-61aa75aeff75",
+      "name": "Build_GND_Prompts"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ersetzt phi (LLM2): deterministische Konsolidierung, kein LLM-Call\nconst FLAGS = [\"DESCRIPTIVE_NO_GND\",\"DEFINITION_MISMATCH\",\"MULTIPLE_CANDIDATES\",\"SYNONYM_USED\",\"LOW_FUZZY_OVERLAP\"];\n\nfunction parseJson(raw) {\n  if (!raw) return null;\n  if (typeof raw === 'object') return raw;\n  let s = String(raw).replace(/```json/gi,'').replace(/```/g,'').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a !== -1 && b !== -1) s = s.slice(a, b + 1);\n  try { return JSON.parse(s); } catch { return null; }\n}\n\nfunction scoreFromTags(tags) {\n  const t = Array.isArray(tags) ? tags.join(' ') : String(tags || '');\n  const hits = FLAGS.filter(f => t.includes(f)).length;\n  return Math.min(1.0, Math.round(hits * 0.2 * 100) / 100);\n}\n\nreturn $input.all().map((item) => {\n  const j = item.json;\n\n  if (!j.final_response) {\n    return { json: { ...j, gnd_result_raw: null, _skip: \"empty_llm1\" } };\n  }\n\n  const v = parseJson(j.final_response);\n  if (!v) {\n    return { json: { ...j, gnd_result_raw: null, _parse_error: \"llm1_unparsable\" } };\n  }\n\n  const conf = v.gnd_confidence || \"no_match\";\n  let gnd_id = v.gnd_id;\n  if (gnd_id === \"null\" || gnd_id === \"\" || gnd_id === undefined) gnd_id = null;\n  if (conf === \"no_match\") gnd_id = null;   // Regel: no_match ⇒ keine ID\n\n  const gnd_result_raw = {\n    id:                 j.id,\n    cluster:            j.cluster,\n    term:               j.term,\n    gnd_id,\n    gnd_preferred_name: v.gnd_preferred_name ?? null,\n    gnd_confidence:     conf,\n    unsicherheit_score: scoreFromTags(v.debug_tags),\n    reasoning:          v.reasoning || \"\",\n    debug_tags:         v.debug_tags || \"NONE\",\n    additional_data:    v.additional_data || { alternate_names: null, definition: null }\n  };\n\n  return { json: { ...j, gnd_result_raw } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        944
+      ],
+      "id": "5bec3344-efd7-45e5-bd71-cb51917e0549",
+      "name": "Parse_LLM1_Response"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Normalize_Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM1_batched": {
+      "main": [
+        [
+          {
+            "node": "Parse_LLM1_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract_GND_Fields": {
+      "main": [
+        [
+          {
+            "node": "Aggregate_GND_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build_GND_Prompts": {
+      "main": [
+        [
+          {
+            "node": "Build_GND_Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize_Input": {
+      "main": [
+        [
+          {
+            "node": "Flatten_to_Terms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten_to_Terms": {
+      "main": [
+        [
+          {
+            "node": "OpenSearch_Bulk_Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenSearch_Bulk_Prep": {
+      "main": [
+        [
+          {
+            "node": "Call_OpenSearch_Bulk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call_OpenSearch_Bulk": {
+      "main": [
+        [
+          {
+            "node": "Build_GND_Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse_LLM1_Response": {
+      "main": [
+        [
+          {
+            "node": "Extract_GND_Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8f5c9db8-8f62-4a48-b662-2bad77a99ed6",
+  "meta": {
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "nodeGroups": [],
+  "id": "gepe9fZaBGmUpB4B",
+  "tags": [
+    {
+      "updatedAt": "2026-06-20T18:32:20.717Z",
+      "createdAt": "2026-06-20T18:32:20.717Z",
+      "id": "3zvvXNaJksRAPxjO",
+      "name": "latest"
+    }
+  ]
+}

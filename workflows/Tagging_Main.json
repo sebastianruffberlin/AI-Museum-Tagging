@@ -1,0 +1,231 @@
+{
+  "name": "local_01_V1.3",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Datenbank anfragen",
+        "height": 232,
+        "width": 792
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -544,
+        864
+      ],
+      "id": "e4300d8a-5a76-48f1-8307-d99de3366f15",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n=========================================================\nSINGLE ITEM PICKER & CLEANER\n- Sucht den ersten Eintrag, der noch nicht 'processed'='ok' ist\n- Reinigt alle Felder dieses Eintrags\n- Bereitet den Kontext-String für das LLM vor\n=========================================================\n*/\n\n// KONFIGURATION\nconst statusFieldName = 'processed'; // Deine Kontrollspalte\nconst targetStatus = 'ok';           // Der Wert, den erledigte Zeilen haben\n\n// Felder, die wir NICHT im Prompt wollen (technisches Zeug / kein Sachfakt)\nconst excludedFromPrompt = [\n    \"processed\",\n    \"SO URL\",\n    \"API URL\",\n    \"Image URL\",\n    \"Bildlink\",\n    \"ID\",\n    \"row_scan\",\n    \"newest\",                 // Workflow-Status, kein Sachfakt\n    \"tags_gemini_2.5_pro\",    // Link-Spalte -> rendert als [object Object],...\n    // \"Schlagworte\",         // <- einkommentieren, um Anchoring durch Alt-Schlagworte zu vermeiden\n    statusFieldName           // Die Kontrollspalte selbst auch nicht\n];\n\n// 1. Input holen\nconst items = $input.all();\nlet targetItem = null;\n\n// 2. SEARCH LOOP: Finde das erste \"offene\" Item\nfor (const item of items) {\n    const currentStatus = item.json[statusFieldName];\n\n    // Bedingung: Wenn Status leer ist ODER ungleich 'ok'\n    if (!currentStatus || currentStatus !== targetStatus) {\n        targetItem = item;\n        break; // WICHTIG: Sofort stoppen, wir wollen nur einen!\n    }\n}\n\n// Wenn alle schon erledigt sind (\"ok\"), geben wir nichts zurück -> Workflow stoppt hier meist\nif (!targetItem) {\n    return [];\n}\n\n// -------------------------------------------------------\n// AB HIER: Reinigung nur für das gefundene targetItem\n// -------------------------------------------------------\n\n// Hilfsfunktion: Text reinigen\nfunction cleanText(text) {\n    if (text === null || text === undefined) return \"Keine Angabe\";\n    let cleaned = String(text);\n    cleaned = cleaned.replace(/[\\u200B\\u00A0]/g, ' '); // Zero Width Spaces weg\n    return cleaned.trim();\n}\n\nconst originalJson = targetItem.json;\nconst cleanJson = {};\nlet contextLines = [];\n\n// Dynamisch über ALLE Spalten iterieren\nfor (const key of Object.keys(originalJson)) {\n    const rawValue = originalJson[key];\n\n    // Wert reinigen\n    const cleanValue = cleanText(rawValue);\n\n    // In das saubere JSON-Objekt speichern (inkl. _id, fuer Update a row)\n    cleanJson[key] = cleanValue;\n\n    // Entscheiden, ob es in den Kontext-String kommt\n    if (\n        cleanValue !== \"Keine Angabe\" &&\n        cleanValue !== \"\" &&\n        !key.startsWith(\"_\") &&            // alle SeaTable-Systemfelder (_id, _ctime, _mtime, _creator, ...) raus\n        !excludedFromPrompt.includes(key)\n    ) {\n        contextLines.push(`${key}: ${cleanValue}`);\n    }\n}\n\n// Den Context-String zusammenbauen\nconst contextString = contextLines.join('\\n');\n\n// Daten in das Item schreiben\ntargetItem.json.metadata_clean = cleanJson;       // _id bleibt hier erhalten\ntargetItem.json.context_data_string = contextString;\n\n// WICHTIG: Wir geben ein Array zurück, das NUR dieses eine Item enthält\nreturn [targetItem];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        928
+      ],
+      "id": "0ad39c41-164f-40ce-98e6-8579c82cc0ef",
+      "name": "Pick_and_Clean_Item"
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "tableName": "metadata",
+        "viewName": "ok",
+        "options": {
+          "simple": false
+        }
+      },
+      "type": "n8n-nodes-base.seaTable",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        928
+      ],
+      "id": "0a61152e-e47d-4b21-bb7c-85b2dc5b93d6",
+      "name": "Get many rows",
+      "credentials": {
+        "seaTableApi": {
+          "id": "YOUR_SEATABLE_CREDENTIAL_ID",
+          "name": "Your SeaTable Credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        144,
+        1104
+      ],
+      "id": "5cddd795-21c5-453b-b169-82272cd332f3",
+      "name": "Wait",
+      "webhookId": "c8d05042-8e9b-4615-ac20-4512c66e40fa"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "MIPgWaBe1tYXlazv",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/MIPgWaBe1tYXlazv",
+          "cachedResultName": "local_02_V1.4"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Bildlink": "={{ $json.Bildlink }}",
+            "context_data_string": "={{ $json.context_data_string }}",
+            "metadata_clean": "={{ $json.metadata_clean }}",
+            "metadata_clean__id": "={{ $json.metadata_clean._id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Bildlink",
+              "displayName": "Bildlink",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "metadata_clean",
+              "displayName": "metadata_clean",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "context_data_string",
+              "displayName": "context_data_string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "metadata_clean__id",
+              "displayName": "metadata_clean__id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -80,
+        928
+      ],
+      "id": "503552cd-aa0e-4833-a1ac-976574ffb2e8",
+      "name": "Call_Tagging_Workflow"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        928
+      ],
+      "id": "4a4e4f3f-f05b-455b-8cc5-f0d9088cf6e7",
+      "name": "When clicking ‘Execute workflow’"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Pick_and_Clean_Item": {
+      "main": [
+        [
+          {
+            "node": "Call_Tagging_Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Pick_and_Clean_Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call_Tagging_Workflow": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1824bc77-c1f4-4128-a2dd-b92b5dbc785d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "nodeGroups": [],
+  "id": "qvJZLuQOXl9SdxMK",
+  "tags": [
+    {
+      "updatedAt": "2026-06-20T18:32:20.717Z",
+      "createdAt": "2026-06-20T18:32:20.717Z",
+      "id": "3zvvXNaJksRAPxjO",
+      "name": "latest"
+    }
+  ]
+}

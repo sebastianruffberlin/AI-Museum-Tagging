@@ -1,0 +1,1073 @@
+{
+  "name": "local_02_V1.4",
+  "nodes": [
+    {
+      "parameters": {
+        "tableName": "tags_gemini_2.5_pro",
+        "columnsUi": {
+          "columnValues": [
+            {
+              "columnName": "cluster",
+              "columnValue": "={{ $json.cluster }}"
+            },
+            {
+              "columnName": "schlagwort",
+              "columnValue": "={{ $json.schlagwort }}"
+            },
+            {
+              "columnName": "gnd_name",
+              "columnValue": "={{ $json.gnd_name }}"
+            },
+            {
+              "columnName": "gnd_id",
+              "columnValue": "={{ $json.gnd_id }}"
+            },
+            {
+              "columnName": "confidence",
+              "columnValue": "={{ $json.confidence }}"
+            },
+            {
+              "columnName": "llm2",
+              "columnValue": "={{ $json.llm2 }}"
+            },
+            {
+              "columnName": "llm3",
+              "columnValue": "={{ $json.llm3 }}"
+            },
+            {
+              "columnName": "llm4",
+              "columnValue": "={{ $json.llm4 }}"
+            },
+            {
+              "columnName": "status",
+              "columnValue": "={{ $json.status }}"
+            },
+            {
+              "columnName": "hinweis",
+              "columnValue": "={{ $json.kritischer_hinweis }}"
+            },
+            {
+              "columnName": "audit1",
+              "columnValue": "={{ $json.audit_1_relevance }}"
+            },
+            {
+              "columnName": "audit2",
+              "columnValue": "={{ $json.audit_2_vision }}"
+            },
+            {
+              "columnName": "audit3",
+              "columnValue": "={{ $json.audit_3_syntax }}"
+            },
+            {
+              "columnName": "audit4",
+              "columnValue": "={{ $json.audit_4_sovereignty }}"
+            },
+            {
+              "columnName": "audit5",
+              "columnValue": "={{ $json.audit_5_museo }}"
+            },
+            {
+              "columnName": "status2",
+              "columnValue": "={{ $json.Protokoll_Status }}"
+            },
+            {
+              "columnName": "config",
+              "columnValue": "=# n8n Workflow — KI-Modell-Konfiguration\nVersion: 1.2\nStand:   2026-06-08\nVerschlagwortung Museumsobjekte (Stadtmuseum Berlin)\nWorkflows: local_01 → local_02 → local_03\n\n## ÄNDERUNGEN GEGENÜBER v1.1\n- Synthese-Schritt (LLM1b) wieder eingeführt: Gemma-4-12B-QAT als Schiedsrichter\n- LLM2 erhält jetzt master_caption (primär) + caption_1 + caption_2 (zur Verifikation)\n- LLM2 System-Prompt angepasst: master_caption als primäre Wahrheit, rohe Captions als Fallback\n- LLM3 System-Prompt angepasst: zwei Captions als Input statt eine synthetisierte\n- LLM2 System-Prompt: Funktion_Zweck Verbotsliste ergänzt (Dokumentation, Darstellung etc.)\n- LLM2 System-Prompt: Kultureller_Kontext Geografie/Datierungen mit Beispielen explizit verboten\n- LLM2 System-Prompt: Abschnitt 7 Technische Ausschlüsse mit Beispielen verschärft\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n## ÜBERBLICK: MODELLE IM WORKFLOW\n\n| Modell | Workflow | Stufe | Aufgabe |\n|---|---|---|---|\n| `qwen3.6-35b-a3b-mtp-q4` | local_02 | Caption 1/2 | Caption v2: parallel mit Gemma (Vision) |\n| `gemma-4-26b-a4b-qat` | local_02 | Caption 2/2 | Caption v2: parallel mit Qwen (Vision) |\n| `gemma-4-12b-qat` | local_02 | LLM1b | Synthese/Schiedsrichter (Vision) |\n| `qwen3.6-27b-mtp` | local_02 | LLM2 | Tagging (Vision + master_caption + 2 rohe Captions) |\n| `gemma-4-31b-it` | local_02 | LLM3 | Judge-Audit (Vision + JSON-Schema) |\n| `qwen3.6-35b-mtp` | local_03 | LLM1 | GND-Batch Retrieve-then-Judge (text-only) |\n\n**API-Endpunkt (alle Calls):** `YOUR_LLM_ENDPOINT/v1/chat/completions`\n**Auth:** `Bearer YOUR_API_KEY`\n**GND-Suche:** `YOUR_OPENSEARCH_ENDPOINT/_msearch`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n## STUFE 1 — CAPTION-PIPELINE (local_02)\n\n### Caption v2: Qwen + Gemma parallel\n**Node:** `Code in JavaScript3`\n\n**Qwen** (`qwen3.6-35b-a3b-mtp-q4`):\n```\ntemperature:       0.1\ntop_p:             0.9\nmax_tokens:        2500\nreasoning_budget:  512\ntimeout:           600000 ms\n```\n\n**Gemma** (`gemma-4-26b-a4b-qat`):\n```\ntemperature:  0.1\ntop_p:        0.9\nmax_tokens:   2500\ntimeout:      600000 ms\n```\n\nBeide laufen via `Promise.allSettled()` parallel im `caption_v2` llama-swap Set.\nIndividueller Fallback pro Modell wenn eines ausfällt.\nOutput: `res_qwen` + `res_gemma`\n\n---\n\n### LLM1b — Synthese/Schiedsrichter\n**Node:** `Code in JavaScript (Synthese)`\n**Modell:** `gemma-4-12b-qat`\n\n```\ntemperature:      0.1\ntop_p:            0.9\nmax_tokens:       3000\nenable_thinking:  false\ntimeout:          300000 ms\nimage_min_tokens: 140\nimage_max_tokens: 280\n```\n\nVision: ja — Originalbild als base64.\nInput: Originalbild + res_qwen + res_gemma.\nAufgabe: Schiedsrichter — prüft beide Captions gegen das Bild, verwirft Halluzinationen,\nmarkiert Unsicherheiten, erstellt konsolidierten Befund.\nFallback: res_qwen wenn Synthese ausfällt.\nOutput: `master_caption` + `res_qwen` + `res_gemma` + `caption_1` + `caption_2`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n## STUFE 2 — TAGGING (local_02)\n\n### LLM2 — Schlagwort-Generator\n**Node:** `Code in JavaScript6` → `HTTP Request3`\n**Modell:** `qwen3.6-27b-mtp`\n\n```\ntemperature:        0.2\ntop_p:              0.8\ntop_k:              20\npresence_penalty:   1.5\nmax_tokens:         4096\nresponse_format:    json_object\nenable_thinking:    false\ntimeout:            2000000 ms\n```\n\nVision: ja — Originalbild als base64 inline eingebettet.\nInput: Originalbild + master_caption (primär) + caption_1 (Verifikation) + caption_2 (Verifikation) + Museumsmetadaten.\nmaster_caption ist primäre Wahrheit. Rohe Captions als Fallback wenn Bild etwas anderes zeigt.\nOutput: JSON mit 11 Clustern (Objekttyp, Thema_Phänomen, Inhalt_Motiv, Funktion_Zweck,\nVisuelle_Merkmale, Form_Gestalt, Bestandteile, Gebrauchskontext,\nKultureller_Kontext, Emotion_Atmosphäre, Farbe_Nuancen).\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n## STUFE 3 — JUDGE-AUDIT (local_02)\n\n### LLM3 — Senior-Revisions-Kustos\n**Node:** `Code in JavaScript7` → `HTTP Request`\n**Modell:** `gemma-4-31b-it`\n\n```\ntemperature:      0.1\ntop_p:            0.8\ntop_k:            20\nmax_tokens:       10000\nenable_thinking:  false\nresponse_format:  json_schema (strict, name: \"llm3_audit_verdict\")\ntimeout:          300000 ms\n```\n\nVision: ja — Bild wird als base64 inline eingebettet (data:image/jpeg;base64,...).\nInput: Originalbild + master_caption + caption_1 + caption_2 + Metadaten + LLM2-Schlagworte + LLM2-Reasoning.\nOutput: Ampel-Triage pro Schlagwort (green / yellow / red) + Decolonial Audit Log.\n\n**JSON-Schema (response_format, strict):**\n```\n_decolonial_audit_log:  { 1_Relevance_Check, 2_Vision_Check, 3_Syntax_Check,\n                          4_Sovereignty_Check, 5_Museo_Check }\nProtokoll_Status:       enum [\"Open Access\", \"Restricted\", \"Sensitive\"]\n_provenance_critique:   string | null\nKritischer_Hinweis:     string | null\n[11 Cluster]:           Array<{ term, why, status (green|yellow|red), judge_comment }>\n```\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n## STUFE 4 — GND-ABGLEICH (local_03)\n\n### LLM1 — GND-Batch Retrieve-then-Judge\n**Node:** `LLM1_batched`\n**Modell:** `qwen3.6-35b-mtp`\n\n```\ntemperature:        0.1\ntop_p:              0.8\ntop_k:              20\npresence_penalty:   0.0\nfrequency_penalty:  0.0\nmax_tokens:         2048\nresponse_format:    json_object\nenable_thinking:    false\nconcurrency:        8\ntimeout:            600000 ms\n```\n\nText-only. Läuft als Batch mit Concurrency 8 (== -np des Servers).\nVorgeschalteter OpenSearch-Bulk-Request (_msearch) liefert pro Begriff 5 GND-Kandidaten.\nLLM1 wählt den besten Kandidaten aus oder gibt no_match zurück.\n\n**Output-Schema pro Begriff:**\n```json\n{\n  \"gnd_id\":             \"ID aus Kandidaten oder null\",\n  \"gnd_preferred_name\": \"Name laut Kandidat oder null\",\n  \"gnd_confidence\":     \"high | medium | low | no_match\",\n  \"reasoning\":          \"Begründung\",\n  \"debug_tags\":         \"DESCRIPTIVE_NO_GND | DEFINITION_MISMATCH | MULTIPLE_CANDIDATES | LOW_FUZZY_OVERLAP | NONE\",\n  \"additional_data\": {\n    \"alternate_names\":  \"Synonyme oder null\",\n    \"definition\":       \"Definition oder null\"\n  }\n}\n```\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n## TIMEOUTS GESAMT\n\n| Stufe | Modell | Timeout |\n|---|---|---|\n| LLM2 Tagging | qwen3.6-27b-mtp | 2000000 ms (33 min) |\n| LLM1 GND-Batch | qwen3.6-35b-mtp | 600000 ms (10 min) |\n| Caption v2 parallel | qwen3.6-35b-a3b-mtp-q4 + gemma-4-26b-a4b-qat | 600000 ms (10 min) |\n| LLM1b Synthese | gemma-4-12b-qat | 300000 ms (5 min) |\n| LLM3 Judge | gemma-4-31b-it | 300000 ms (5 min) |"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.seaTable",
+      "typeVersion": 2,
+      "position": [
+        224,
+        1680
+      ],
+      "id": "6b97083f-bc37-44c8-9522-8c219b0f5402",
+      "name": "Create a row",
+      "credentials": {
+        "seaTableApi": {
+          "id": "YOUR_SEATABLE_CREDENTIAL_ID",
+          "name": "Your SeaTable Credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableName": "metadata",
+        "rowId": "={{ $('Start').item.json.metadata_clean._id }}",
+        "columnsUi": {
+          "columnValues": [
+            {
+              "columnName": "processed",
+              "columnValue": "ok"
+            },
+            {
+              "columnName": "newest",
+              "columnValue": "ok_1.3"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.seaTable",
+      "typeVersion": 2,
+      "position": [
+        864,
+        1680
+      ],
+      "id": "85036281-1768-4061-8a36-8ad649e85c55",
+      "name": "Update a row",
+      "credentials": {
+        "seaTableApi": {
+          "id": "YOUR_SEATABLE_CREDENTIAL_ID",
+          "name": "Your SeaTable Credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "link",
+        "tableName": "tags_gemini_2.5_pro:::fvU0",
+        "linkColumn": "=parent_id:::k11D:::IQEj",
+        "linkColumnSourceId": "={{ $('Create a row').item.json._id }}",
+        "linkColumnTargetId": "={{ $('Map_to_SeaTable_Schema').item.json.Objekt_Referenz }}"
+      },
+      "type": "n8n-nodes-base.seaTable",
+      "typeVersion": 2,
+      "position": [
+        576,
+        1680
+      ],
+      "id": "e218df03-b3b8-48d1-8b3a-120f95b8dc8a",
+      "name": "Add a row link",
+      "credentials": {
+        "seaTableApi": {
+          "id": "YOUR_SEATABLE_CREDENTIAL_ID",
+          "name": "Your SeaTable Credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{\n  {\n    \"Objekt_Referenz\": $('Start').item.json.metadata_clean._id,\n    \"Protokoll_Status\": $json.Protokoll_Status,\n    \"kritischer_hinweis\": $json.Kritischer_Hinweis,\n    \"audit_1_relevance\": $json.Audit_1_Relevance,\n    \"audit_2_vision\": $json.Audit_2_Vision,\n    \"audit_3_syntax\": $json.Audit_3_Syntax,\n    \"audit_4_sovereignty\": $json.Audit_4_Sovereignty,\n    \"audit_5_museo\": $json.Audit_5_Museo,\n    \"cluster\": $json.Cluster,\n    \"schlagwort\": $json.Schlagwort,\n    \"status\": $json.Status,\n    \"gnd_name\": $json.GND_Name,\n    \"gnd_id\": $json.GND_ID,\n    \"confidence\": $json.Confidence,\n    \"llm2\": $json.LLM2_Rationale,\n    \"llm3\": $json.LLM3_Judge,\n    \"llm4\": $json.LLM4_Reasoning\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        48,
+        1680
+      ],
+      "id": "b4828023-a18b-4dff-8a41-3c7d55d22055",
+      "name": "Map_to_SeaTable_Schema"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -512,
+        1680
+      ],
+      "id": "5e40ac58-a8c8-46ab-b2a5-1bdb2d86adb6",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n=========================================================\nWEDDING NODE (Merge Appended Branches)\n- Sammelt gnd_result_string und Triage-Daten (rejected) ein\n- Harmonisiert das Daten-Schema für SeaTable\n- Erstellt genau EIN finales Output-Item\n=========================================================\n*/\n\nconst items = $input.all();\n\n// 1. Variablen zum Einsammeln der Daten aus den verschiedenen Strängen\nlet gndString = \"{}\";\nlet rejectedData = {};\nlet topLevelMeta = {\n    _decolonial_audit_log: null,\n    Protokoll_Status: \"Unknown\",\n    Kritischer_Hinweis: null\n};\n\n// 2. Alle eintreffenden Items durchsuchen (fangen den \"Append\" auf)\nfor (const item of items) {\n    const json = item.json;\n\n    // A: Hat dieses Item den GND-String?\n    if (json.gnd_result_string) {\n        gndString = json.gnd_result_string;\n    }\n\n    // B: Hat dieses Item die Triage-Ergebnisse?\n    const currentRejected = json.payload_rejected || json.llm_result?.payload_rejected;\n\n    if (currentRejected) {\n        rejectedData = currentRejected;\n        topLevelMeta._decolonial_audit_log = json._decolonial_audit_log || currentRejected._decolonial_audit_log;\n        topLevelMeta.Protokoll_Status = json.Protokoll_Status || currentRejected.Protokoll_Status;\n        topLevelMeta.Kritischer_Hinweis = json.Kritischer_Hinweis || currentRejected.Kritischer_Hinweis;\n    }\n}\n\n// 3. Den GND-String zu einem echten JSON entpacken\nlet validatedData = {};\ntry {\n    validatedData = JSON.parse(gndString);\n} catch (e) {\n    validatedData = {};\n}\n\n// 4. Das finale Output-Objekt vorbereiten\nconst finalOutput = {\n    _decolonial_audit_log: topLevelMeta._decolonial_audit_log,\n    Protokoll_Status: topLevelMeta.Protokoll_Status,\n    Kritischer_Hinweis: topLevelMeta.Kritischer_Hinweis\n};\n\nconst clusters = [\n    \"Objekttyp\", \"Thema_Phänomen\", \"Inhalt_Motiv\", \"Funktion_Zweck\",\n    \"Visuelle_Merkmale\", \"Form_Gestalt\", \"Bestandteile\", \"Gebrauchskontext\",\n    \"Kultureller_Kontext\", \"Emotion_Atmosphäre\", \"Farbe_Nuancen\"\n];\n\n// 5. Cluster zusammenführen (Die eigentliche Hochzeit)\nfor (const cluster of clusters) {\n    const mergedCluster = [];\n\n    // A) Validierte Begriffe (GRÜN, aus dem GND-Strang)\n    if (validatedData[cluster] && Array.isArray(validatedData[cluster])) {\n        for (const validItem of validatedData[cluster]) {\n            mergedCluster.push({\n                term: validItem.term,\n                status: \"green\", // hier kommen nur echte Grüne an\n                gnd_name: validItem.gnd_name || null,\n                gnd_id: validItem.gnd_id || null,\n                confidence: validItem.confidence || null,\n                llm2_rationale: validItem.llm2_rationale || null,\n                llm3_judge_comment: validItem.llm3_judge_comment || null,\n                llm4_reasoning: validItem.llm4_reasoning || null\n            });\n        }\n    }\n\n    // B) Zurückgehaltene Begriffe (GELB + ROT, aus dem Triage-Strang)\n    if (rejectedData[cluster] && Array.isArray(rejectedData[cluster])) {\n        for (const rejectedItem of rejectedData[cluster]) {\n            mergedCluster.push({\n                term: rejectedItem.term,\n                status: rejectedItem.status || \"red\", // gelb bleibt gelb, rot bleibt rot\n                gnd_name: null,\n                gnd_id: null,\n                confidence: null,\n                llm2_rationale: rejectedItem.why || null,\n                llm3_judge_comment: rejectedItem.judge_comment || null,\n                llm4_reasoning: \"Status nicht grün – zurückgehalten, kein GND-Abgleich durchgeführt.\"\n            });\n        }\n    }\n\n    finalOutput[cluster] = mergedCluster;\n}\n\n// 6. Wir geben exakt EIN Item zurück, das alles beinhaltet\nreturn [{ json: finalOutput }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        1680
+      ],
+      "id": "84319c94-5624-4f81-a76f-3c501960b771",
+      "name": "Merge_GND_and_Rejected"
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n=========================================================\nFLATTEN FOR SEATABLE (1 Item pro Schlagwort)\n- Löst die Cluster auf\n- Erstellt für jedes Schlagwort ein eigenes n8n-Item\n- Vererbt das komplette Decolonial Audit Log an jedes Item\n- Bereitet die Spaltennamen für SeaTable vor\n=========================================================\n*/\n\nconst items = $input.all();\nconst flattenedKeywords = [];\n\nconst clusters = [\n    \"Objekttyp\", \"Thema_Phänomen\", \"Inhalt_Motiv\", \"Funktion_Zweck\",\n    \"Visuelle_Merkmale\", \"Form_Gestalt\", \"Bestandteile\", \"Gebrauchskontext\",\n    \"Kultureller_Kontext\", \"Emotion_Atmosphäre\", \"Farbe_Nuancen\"\n];\n\nfor (const item of items) {\n    const json = item.json;\n    \n    // Wir isolieren das Audit-Log (mit Fallback, falls es mal fehlen sollte)\n    const auditLog = json._decolonial_audit_log || {};\n\n    // Iteriere durch alle Cluster\n    for (const cluster of clusters) {\n        const keywordArray = json[cluster];\n\n        // Wenn das Cluster existiert und befüllt ist...\n        if (keywordArray && Array.isArray(keywordArray)) {\n            for (const kw of keywordArray) {\n                \n                // Erstelle ein isoliertes Item für jedes einzelne Schlagwort\n                flattenedKeywords.push({\n                    json: {\n                        // METADATEN DES OBJEKTS\n                        // Objekt_ID: json.ID || \"N/A\",  <-- Objekt-Referenz für SeaTable\n                        Protokoll_Status: json.Protokoll_Status || \"Unknown\",\n                        Kritischer_Hinweis: json.Kritischer_Hinweis || \"\",\n                        \n                        // DECOLONIAL AUDIT LOG (aufgeschlüsselt)\n                        Audit_1_Relevance: auditLog[\"1_Relevance_Check\"] || \"\",\n                        Audit_2_Vision: auditLog[\"2_Vision_Check\"] || \"\",\n                        Audit_3_Syntax: auditLog[\"3_Syntax_Check\"] || \"\",\n                        Audit_4_Sovereignty: auditLog[\"4_Sovereignty_Check\"] || \"\",\n                        Audit_5_Museo: auditLog[\"5_Museo_Check\"] || \"\",\n                        \n                        // SCHLAGWORT-DATEN\n                        Cluster: cluster,\n                        Schlagwort: kw.term,\n                        Status: kw.status,\n                        GND_Name: kw.gnd_name || \"\",\n                        GND_ID: kw.gnd_id || \"\",\n                        Confidence: kw.confidence || \"\",\n                        LLM2_Rationale: kw.llm2_rationale || \"\",\n                        LLM3_Judge: kw.llm3_judge_comment || \"\",\n                        LLM4_Reasoning: kw.llm4_reasoning || \"\"\n                    }\n                });\n            }\n        }\n    }\n}\n\n// Gibt eine flache Liste aller Schlagworte zurück\nreturn flattenedKeywords;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -144,
+        1680
+      ],
+      "id": "ab26a547-bc17-4ea2-87cd-edbd763d22c3",
+      "name": "Flatten_for_SeaTable"
+    },
+    {
+      "parameters": {
+        "content": "## Keywords parsen, nach Seatable schreiben\n",
+        "height": 281,
+        "width": 1828
+      },
+      "id": "c0969698-7f71-4590-a2fd-d18026e25abc",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n=========================================================\nJSON PARSER & DECOLONIAL VALIDATOR (v5 — Fehlerklassen-Entscheider)\n1. Parst die LLM-Antwort; Fallback auf Leer-Skelett bei Parse-Fehler\n2. DE-BIAS: nur 'term', exakter Ganzwort-Abgleich (REPLACE/CONTEXTUALIZE/DROP)\n3. NEU: Status wird aus fehlerklassen BERECHNET (nicht mehr vom LLM)\n   Präzedenz: Wegwerf > Reparier > Verschieben/grün\n   FALSCHER_CLUSTER -> Code verschiebt ins correct_cluster (bleibt grün)\n4. NEU: Code-Netze über die Grünen: DATIERUNG (Regex) + exakte Dopplung\n5. NUR GRÜN -> payload_valid (GND); Gelb + Rot -> payload_rejected\n=========================================================\n*/\n\n// ------------------------------------------------------\n// TEIL A: KONFIGURATION\n// ------------------------------------------------------\nconst DE_BIAS_MAP = {\n  \"Abendland\": {\"replacement\": [\"Westasien\", \"Europa\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Eurozentrismus\"},\n  \"Abnormitätenschau\": {\"replacement\": [], \"action\": \"CONTEXTUALIZE\", \"category\": \"Ableismus\"},\n  \"Afrikaner\": {\"replacement\": [\"Menschen des afrikanischen Kontinents\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Kolonialismus\"},\n  \"Arisierung\": {\"replacement\": [\"Raub\", \"Enteignung\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"NS-Unrecht\"},\n  \"Australneger\": {\"replacement\": [\"Aborigine\"], \"action\": \"REPLACE\", \"category\": \"Rassismus\"},\n  \"Bastard\": {\"replacement\": [\"Außereheliches Kind\"], \"action\": \"REPLACE\", \"category\": \"Abwertung\"},\n  \"Behinderter\": {\"replacement\": [\"Mensch mit Behinderung\"], \"action\": \"REPLACE\", \"category\": \"Ableismus\"},\n  \"Berber\": {\"replacement\": [\"Imazighen\"], \"action\": \"REPLACE\", \"category\": \"Kolonialismus\"},\n  \"Buschleute\": {\"replacement\": [\"San\", \"Khoisan\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Kolonialismus\"},\n  \"Buschneger\": {\"replacement\": [\"Maroons\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Rassismus\"},\n  \"Drittes Reich\": {\"replacement\": [\"NS-Regime\"], \"action\": \"REPLACE\", \"category\": \"Nationalsozialismus\"},\n  \"Dunkelhäutig\": {\"replacement\": [\"Schwarze Menschen\", \"PoC\"], \"action\": \"REPLACE\", \"category\": \"Rassismus\"},\n  \"Eingeboren\": {\"replacement\": [\"Indigen\"], \"action\": \"REPLACE\", \"category\": \"Kolonialismus\"},\n  \"Endlösung\": {\"replacement\": [\"Shoah\", \"Holocaust\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"NS-Euphemismus\"},\n  \"Eskimo\": {\"replacement\": [\"Inuit\"], \"action\": \"REPLACE\", \"category\": \"Kolonialismus\"},\n  \"Exotisch\": {\"replacement\": [], \"action\": \"CONTEXTUALIZE\", \"category\": \"Exotismus\"},\n  \"Farbig\": {\"replacement\": [], \"action\": \"DROP\", \"category\": \"Rassismus\"},\n  \"Gastarbeiter\": {\"replacement\": [\"Arbeitsmigranten\"], \"action\": \"REPLACE\", \"category\": \"Migration\"},\n  \"Gypsy\": {\"replacement\": [\"Roma\", \"Sinti\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Antiziganismus\"},\n  \"Häuptling\": {\"replacement\": [\"Oberhaupt\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Kolonialismus\"},\n  \"Hottentotte\": {\"replacement\": [\"Khoikhoi\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Rassismus\"},\n  \"Indianer\": {\"replacement\": [\"Indigene Bevölkerung\", \"Native Americans\"], \"action\": \"REPLACE\", \"category\": \"Kolonialismus\"},\n  \"Irrenanstalt\": {\"replacement\": [\"Psychiatrische Klinik\"], \"action\": \"REPLACE\", \"category\": \"Ableismus\"},\n  \"Kristallnacht\": {\"replacement\": [\"Novemberpogrome\"], \"action\": \"REPLACE\", \"category\": \"NS-Euphemismus\"},\n  \"Krüppel\": {\"replacement\": [\"Mensch mit Behinderung\"], \"action\": \"REPLACE\", \"category\": \"Ableismus\"},\n  \"Mohr\": {\"replacement\": [\"Schwarzer Mensch\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Rassismus\"},\n  \"Mongoloid\": {\"replacement\": [\"Person mit Trisomie 21\"], \"action\": \"REPLACE\", \"category\": \"Ableismus\"},\n  \"Morgenland\": {\"replacement\": [\"Naher Osten\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Eurozentrismus\"},\n  \"Mulatte\": {\"replacement\": [\"Person mit binationalem Hintergrund\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Rassismus\"},\n  \"Muselmann\": {\"replacement\": [\"Muslim\"], \"action\": \"REPLACE\", \"category\": \"Islamfeindlichkeit\"},\n  \"Naturvolk\": {\"replacement\": [\"Indigene Gemeinschaft\"], \"action\": \"REPLACE\", \"category\": \"Kolonialismus\"},\n  \"Neger\": {\"replacement\": [\"Schwarzer Mensch\", \"PoC\"], \"action\": \"REPLACE\", \"category\": \"Rassismus\"},\n  \"Orientalisch\": {\"replacement\": [\"Westasiatisch\", \"Arabisch\"], \"action\": \"REPLACE\", \"category\": \"Eurozentrismus\"},\n  \"Rasse\": {\"replacement\": [], \"action\": \"DROP\", \"category\": \"Rassismus\"},\n  \"Schwarzafrika\": {\"replacement\": [\"Subsahara-Afrika\"], \"action\": \"CONTEXTUALIZE\", \"category\": \"Rassismus\"},\n  \"Taubstumm\": {\"replacement\": [\"Gehörlos\"], \"action\": \"REPLACE\", \"category\": \"Ableismus\"},\n  \"Transsexuell\": {\"replacement\": [\"Transgeschlechtlich\"], \"action\": \"REPLACE\", \"category\": \"Gender\"},\n  \"Zigeuner\": {\"replacement\": [\"Roma und Sinti\"], \"action\": \"REPLACE\", \"category\": \"Antiziganismus\"},\n  \"Zwerg\": {\"replacement\": [\"Kleinwüchsiger Mensch\"], \"action\": \"REPLACE\", \"category\": \"Ableismus\"}\n};\n\n// ------------------------------------------------------\n// TEIL B: HELFER\n// ------------------------------------------------------\nfunction normalizeTerm(t) {\n  return String(t === null || t === undefined ? \"\" : t).trim().toLowerCase();\n}\n\nconst BIAS_LOOKUP = {};\nfor (const [key, rule] of Object.entries(DE_BIAS_MAP)) {\n  BIAS_LOOKUP[normalizeTerm(key)] = { original: key, ...rule };\n}\n\nconst META_KEYS = [\"_decolonial_audit_log\", \"Protokoll_Status\", \"_provenance_critique\", \"Kritischer_Hinweis\"];\n\nconst CLUSTERS = [\n  \"Objekttyp\", \"Thema_Phänomen\", \"Inhalt_Motiv\", \"Funktion_Zweck\",\n  \"Visuelle_Merkmale\", \"Form_Gestalt\", \"Bestandteile\", \"Gebrauchskontext\",\n  \"Kultureller_Kontext\", \"Emotion_Atmosphäre\", \"Farbe_Nuancen\"\n];\n\n// Fehlerklassen -> Status\nconst DISCARD_CLASSES = new Set([\n  \"KEINE_EVIDENZ\",\"HALLUZINATION\",\"MATERIAL_PUR\",\"MATERIAL_TECHNIK\",\"DATIERUNG\",\n  \"GEOGRAFIE_EIGENNAME\",\"SPEKULATION_ZIRKEL\",\"ASYMMETRIE\",\"REDUNDANZ\"\n]);\nconst REPAIR_CLASSES = new Set([\"PLURAL\",\"ADJEKTIV\",\"KOMPOSITUM\",\"FEHLENDE_BRUECKE\",\"MATERIAL_KOMPOSITUM\"]);\nconst MOVE_CLASS = \"FALSCHER_CLUSTER\";\n\n// Leer-Skelett bei unparsebarer LLM3-Antwort\nfunction buildEmptySkeleton(note) {\n  const skel = {\n    _decolonial_audit_log: {\n      \"1_Relevance_Check\": \"\", \"2_Vision_Check\": \"\", \"3_Syntax_Check\": \"\",\n      \"4_Sovereignty_Check\": \"\", \"5_Museo_Check\": \"\"\n    },\n    Protokoll_Status: \"Restricted Access (Check Local Contexts)\",\n    _provenance_critique: null,\n    Kritischer_Hinweis: note\n  };\n  for (const c of CLUSTERS) skel[c] = [];\n  return skel;\n}\n\n// DE-BIAS: prüft NUR term (exakter Ganzwort-Abgleich)\nfunction applyBiasPolicyToTerms(parsedData, warningsList) {\n  for (const [key, value] of Object.entries(parsedData)) {\n    if (META_KEYS.includes(key) || !Array.isArray(value)) continue;\n    const kept = [];\n    for (const entry of value) {\n      if (!entry || typeof entry.term !== \"string\") { kept.push(entry); continue; }\n      const rule = BIAS_LOOKUP[normalizeTerm(entry.term)];\n      if (!rule) { kept.push(entry); continue; }\n\n      if (rule.action === \"DROP\") {\n        warningsList.push(`Begriff '${entry.term}' automatisch entfernt (${rule.category}).`);\n        continue;\n      }\n      if (rule.action === \"REPLACE\" && rule.replacement && rule.replacement.length > 0) {\n        warningsList.push(`Begriff '${entry.term}' ersetzt durch '${rule.replacement[0]}' (${rule.category}).`);\n        entry.term = rule.replacement[0];\n        kept.push(entry);\n        continue;\n      }\n      if (rule.action === \"CONTEXTUALIZE\") {\n        if (!entry.term.includes(\"[sic!]\")) entry.term = `${entry.term} [sic!]`;\n        warningsList.push(`SENSITIV: Begriff '${rule.original}' markiert (${rule.category}).`);\n        kept.push(entry);\n        continue;\n      }\n      kept.push(entry);\n    }\n    parsedData[key] = kept;\n  }\n}\n\n// Status aus fehlerklassen berechnen + FALSCHER_CLUSTER verschieben\nfunction deriveStatusAndMove(parsedData) {\n  const moves = [];\n  for (const cluster of CLUSTERS) {\n    const arr = Array.isArray(parsedData[cluster]) ? parsedData[cluster] : [];\n    for (const it of arr) {\n      if (!it || typeof it !== \"object\") continue;\n      const flags = Array.isArray(it.fehlerklassen) ? it.fehlerklassen : [];\n\n      let status = \"green\";\n      if (flags.some(f => DISCARD_CLASSES.has(f))) status = \"red\";\n      else if (flags.some(f => REPAIR_CLASSES.has(f))) status = \"yellow\";\n      it.status = status;\n\n      if (status !== \"red\" &&\n          flags.includes(MOVE_CLASS) &&\n          typeof it.correct_cluster === \"string\" &&\n          CLUSTERS.includes(it.correct_cluster) &&\n          it.correct_cluster !== cluster) {\n        moves.push({ from: cluster, to: it.correct_cluster, item: it });\n      }\n    }\n  }\n  for (const m of moves) {\n    const fromArr = parsedData[m.from];\n    if (Array.isArray(fromArr)) {\n      const idx = fromArr.indexOf(m.item);\n      if (idx !== -1) fromArr.splice(idx, 1);\n    }\n    if (!Array.isArray(parsedData[m.to])) parsedData[m.to] = [];\n    parsedData[m.to].push(m.item);\n  }\n}\n\n// Deterministische Netze über die GRÜNEN: Datierung + exakte Dopplung\nfunction applyGreenNets(parsedData, warningsList) {\n  const DATE_RE = /\\b\\d{4}\\b|jahrhundert|\\bjh\\.?\\b|\\b\\d{2,4}er\\b/i;\n  const seen = new Set();\n  for (const cluster of CLUSTERS) {\n    const arr = Array.isArray(parsedData[cluster]) ? parsedData[cluster] : [];\n    for (const it of arr) {\n      if (!it || it.status !== \"green\" || typeof it.term !== \"string\") continue;\n\n      if (DATE_RE.test(it.term)) {\n        it.status = \"red\";\n        it.judge_comment = (it.judge_comment ? it.judge_comment + \" | \" : \"\") + \"CODE-NET: Datierung -> entfernt.\";\n        warningsList.push(`Datierung '${it.term}' per Code entfernt.`);\n        continue;\n      }\n\n      const key = normalizeTerm(it.term);\n      if (seen.has(key)) {\n        it.status = \"red\";\n        it.judge_comment = (it.judge_comment ? it.judge_comment + \" | \" : \"\") + \"CODE-NET: exakte Dopplung -> entfernt.\";\n        warningsList.push(`Dopplung '${it.term}' per Code entfernt.`);\n      } else {\n        seen.add(key);\n      }\n    }\n  }\n}\n\n// ------------------------------------------------------\n// TEIL C: PARSING\n// ------------------------------------------------------\nconst items = $input.all();\nconst outputItems = [];\n\nfunction cleanAndParse(text) {\n    if (!text) return { error: \"Empty content\" };\n    let cleaned = text.replace(/^```json\\s*/i, '').replace(/\\s*```$/, '');\n    const firstBrace = cleaned.indexOf('{');\n    const lastBrace = cleaned.lastIndexOf('}');\n    if (firstBrace !== -1 && lastBrace !== -1) {\n        cleaned = cleaned.substring(firstBrace, lastBrace + 1);\n    }\n    try {\n        return JSON.parse(cleaned);\n    } catch (e) {\n        try {\n            const fixed = cleaned.replace(/\\\\\"/g, '\"');\n            return JSON.parse(fixed);\n        } catch (e2) {\n            return { _parsing_error: true, raw_text: text };\n        }\n    }\n}\n\n// ------------------------------------------------------\n// TEIL D: HAUPTSCHLEIFE\n// ------------------------------------------------------\nfor (const item of items) {\n    const json = item.json;\n\n    // 1. PFAD-SUCHE\n    let contentString = \"\";\n    if (json.choices && json.choices[0] && json.choices[0].message) {\n        contentString = json.choices[0].message.content;\n    } else if (json.message && json.message.content) {\n        contentString = json.message.content;\n    } else if (json.response) {\n        contentString = json.response;\n    } else if (json.content && json.content.parts) {\n        contentString = json.content.parts[0].text;\n    } else {\n        contentString = JSON.stringify(json);\n    }\n\n    // 2. PARSEN (+ Fallback)\n    let parsedData = cleanAndParse(contentString);\n    if (parsedData._parsing_error || parsedData.error) {\n        const rawText = parsedData.raw_text || \"\";\n        parsedData = buildEmptySkeleton(\"AUTO-FLAG: LLM3-Antwort nicht parsebar – Objekt ohne Tags durchgereicht.\");\n        parsedData._llm3_unparsable = true;\n        parsedData._llm3_raw = rawText;\n    }\n\n    // 3. DE-BIAS -> STATUS BERECHNEN -> CODE-NETZE -> SPLIT\n    {\n        const warnings = [];\n        applyBiasPolicyToTerms(parsedData, warnings);   // term-Bereinigung\n        deriveStatusAndMove(parsedData);                // fehlerklassen -> status + Verschiebung\n        applyGreenNets(parsedData, warnings);           // Datierung + Dopplung über die Grünen\n\n        if (warnings.length > 0) {\n            const existingNote = parsedData.Kritischer_Hinweis ? parsedData.Kritischer_Hinweis + \" | \" : \"\";\n            const uniqueWarnings = [...new Set(warnings)];\n            parsedData.Kritischer_Hinweis = existingNote + \"AUTO-FLAG: \" + uniqueWarnings.join(\" \");\n        }\n\n        // NUR GRÜN -> payload_valid; GELB + ROT -> payload_rejected\n        let payload_valid = {};\n        let payload_rejected = {};\n        let hasRedStatus = false;\n\n        for (const key of META_KEYS) {\n            if (parsedData[key] !== undefined) {\n                payload_valid[key] = parsedData[key];\n                payload_rejected[key] = parsedData[key];\n            }\n        }\n\n        for (const [key, value] of Object.entries(parsedData)) {\n            if (!META_KEYS.includes(key) && Array.isArray(value)) {\n                const validItems = [];\n                const rejectedItems = [];\n                value.forEach(clusterItem => {\n                    if (clusterItem && clusterItem.status === 'green') {\n                        validItems.push(clusterItem);\n                    } else {\n                        rejectedItems.push(clusterItem);\n                        hasRedStatus = true;\n                    }\n                });\n                payload_valid[key] = validItems;\n                payload_rejected[key] = rejectedItems;\n            }\n        }\n\n        parsedData.payload_valid = payload_valid;\n        parsedData.payload_rejected = payload_rejected;\n        parsedData.has_red_status = hasRedStatus;\n    }\n\n    // 4. OUTPUT\n    const newItem = {\n        ...json,\n        llm_result: parsedData,\n        has_red_status: parsedData.has_red_status,\n        ...parsedData\n    };\n    outputItems.push({ json: newItem });\n}\n\nreturn outputItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        1296
+      ],
+      "id": "b95cf37d-6306-4042-8015-78d26bee315d",
+      "name": "Parse_LLM3_and_Debias"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"1_Relevance_Check\": {{ JSON.stringify($json.payload_valid._decolonial_audit_log[\"1_Relevance_Check\"]) }},\n  \"2_Vision_Check\": {{ JSON.stringify($json.payload_valid._decolonial_audit_log[\"2_Vision_Check\"]) }},\n  \"3_Syntax_Check\": {{ JSON.stringify($json.payload_valid._decolonial_audit_log[\"3_Syntax_Check\"]) }},\n  \"4_Sovereignty_Check\": {{ JSON.stringify($json.payload_valid._decolonial_audit_log[\"4_Sovereignty_Check\"]) }},\n  \"5_Museo_Check\": {{ JSON.stringify($json.payload_valid._decolonial_audit_log[\"5_Museo_Check\"]) }},\n\n  \"Protokoll_Status\": {{ JSON.stringify($json.payload_valid.Protokoll_Status) }},\n\n  \"Objekttyp\": {{ JSON.stringify($json.payload_valid.Objekttyp || []) }},\n  \"Thema_Phänomen\": {{ JSON.stringify($json.payload_valid[\"Thema_Phänomen\"] || []) }},\n  \"Inhalt_Motiv\": {{ JSON.stringify($json.payload_valid.Inhalt_Motiv || []) }},\n  \"Funktion_Zweck\": {{ JSON.stringify($json.payload_valid.Funktion_Zweck || []) }},\n  \"Visuelle_Merkmale\": {{ JSON.stringify($json.payload_valid.Visuelle_Merkmale || []) }},\n  \"Form_Gestalt\": {{ JSON.stringify($json.payload_valid.Form_Gestalt || []) }},\n  \"Bestandteile\": {{ JSON.stringify($json.payload_valid.Bestandteile || []) }},\n  \"Gebrauchskontext\": {{ JSON.stringify($json.payload_valid.Gebrauchskontext || []) }},\n  \"Kultureller_Kontext\": {{ JSON.stringify($json.payload_valid.Kultureller_Kontext || []) }},\n  \"Emotion_Atmosphäre\": {{ JSON.stringify($json.payload_valid[\"Emotion_Atmosphäre\"] || []) }},\n  \"Farbe_Nuancen\": {{ JSON.stringify($json.payload_valid.Farbe_Nuancen || []) }},\n\n  \"Kritischer_Hinweis\": {{ JSON.stringify($json.payload_valid.Kritischer_Hinweis || \"\") }},\n\n\"Caption\": {{ JSON.stringify($('02_keywords').item.json.master_caption || \"\") }},\n\"Metadata\": {{ JSON.stringify($('02_keywords').item.json.context_data_string || \"\") }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        256,
+        1296
+      ],
+      "id": "12f693a0-11ee-4e91-aa78-71d985b5ce60",
+      "name": "Build_GND_Payload"
+    },
+    {
+      "parameters": {
+        "content": "## Keywords auf GND mappen",
+        "height": 233,
+        "width": 1724
+      },
+      "id": "10704340-ae32-47fa-b13d-51d1005eb4f7",
+      "name": "Sticky Note4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5560da00-8c14-4763-8aef-f6de3d83577f",
+              "name": "choices[0].message.content",
+              "value": "={{ $json.body.choices[0].message.content }}",
+              "type": "string"
+            },
+            {
+              "id": "32675ba7-996e-4da1-9dbc-e14f0584be4c",
+              "name": "choices[0].message.reasoning",
+              "value": "={{ $json.body.choices[0].message.reasoning_content }}",
+              "type": "string"
+            },
+            {
+              "id": "42d0aff5-f742-4652-a2ce-f30037721be1",
+              "name": "Image",
+              "value": "={{ $('02_keywords').item.json.Image }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        96,
+        944
+      ],
+      "id": "5d770f0e-fdf1-4817-a017-bd4a8a48cbde",
+      "name": "Extract_LLM2_Response"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c06e74dd-1e46-4c00-a165-62ba24d88fde",
+              "name": "rawSystempromptText",
+              "value": "=SYSTEM-PROMPT: DECOLONIAL MIDDLEWARE & MUSEUM DOCUMENTATION\nVersion: 1.3\nStand:   2026-06-08\n\n0. PRÄAMBEL & MISSION: DEMOKRATISIERUNG DER SAMMLUNG\n\nDER KONTEXT: Du verarbeitest historische Objektdokumentationen eines Stadtmuseums mit 4,5 Millionen Objekten aus 40 Teilsammlungen. Diese Daten sind in den letzten 150 Jahren von Generationen von Museolog:innen erstellt worden. Sie sind oft undurchsichtig, exklusiv, voller Fachjargon, teilweise undokumentiert und tragen historische Biases in sich.\n\nDIE ZIELGRUPPE: Deine Zielgruppe sind AUSSCHLIESSLICH Nicht-Expert:innen. Es sind alltägliche Nutzer:innen, die weder die Struktur der Sammlung noch fachspezifische Terminologien kennen und nicht aus der Forschung kommen.\n\nDEINE MISSION (DAS WARUM): Du bist der Übersetzer zwischen einem historischen Experten-Archiv und der modernen Öffentlichkeit. Dein Hauptziel ist es, diese riesige, komplexe Sammlung für Laien suchbar und verständlich zu machen. Du transformierst exklusives Herrschaftswissen in zugängliche, alltagssprachliche Schlagworte, auf die ein durchschnittlicher Mensch bei einer Suchanfrage kommen würde. Gleichzeitig reparierst du epistemische Gewalt durch dekoloniale Sensibilität, ohne das Objekt historisch zu verfälschen.\n\nWICHTIG ZU DEINER WAHRNEHMUNG: Du erhältst das Originalbild, einen konsolidierten visuellen Befund (master_caption — von Gemma-4-12B als Schiedsrichter synthetisiert, inkl. Abschnitt 7 SENSITIVITÄTS-HINWEIS und Abschnitt 8 KONFIDENZ/UNSICHERHEIT) sowie zwei rohe Ausgangsbefunde (Caption A von Qwen, Caption B von Gemma) zur Verifikation. Die master_caption ist deine primäre visuelle Wahrheit. Die rohen Captions dienen als Fallback wenn du am Bild etwas anderes siehst als die master_caption beschreibt. Was weder master_caption noch Bild belegen, tagge nicht.\n\n0.1 INPUT-VERARBEITUNG & KONFLIKTLÖSUNG (BEFUND VS. METADATEN)\n\nDu erhältst vier Quellen: das Originalbild, einen konsolidierten visuellen Befund (master_caption — primäre Wahrheit), zwei rohe Ausgangsbefunde (Caption A von Qwen, Caption B von Gemma — zur Verifikation) und die historischen Metadaten. Die master_caption ist primär. Bei Zweifeln an der master_caption prüfe Caption A/B und das Bild direkt. Bei Widersprüchen zwischen Caption A und B entscheidet die master_caption, im Zweifel das Bild. Beide Quellen sind oft asymmetrisch: Die Befunde können unsichere Beobachtungen enthalten (in Abschnitt 8 als [unsicher] markiert), Metadaten können Dinge nennen, die in den Befunden nicht auftauchen, oder offensichtliche optische Merkmale ignorieren.\n\nGehe bei Diskrepanzen exakt nach dieser Matrix vor:\n\n1. Das \"Unsichtbare\" aus dem Text: Wenn die Metadaten laienrelevante Dinge beschreiben, die in den visuellen Befunden nicht vorkommen (z.B. das Innere einer geschlossenen Schatulle, die Funktion eines kryptischen Werkzeugs), dann vertraue dem Text und tagge diese Begriffe.\n2. Die optische Realität für Laien: Wenn die Befunde oder das Bild eindeutige optische Merkmale nennen (z.B. kaputt, Rost, rund, Hund im Hintergrund), die in den Metadaten fehlen, dann tagge sie! Laien suchen sehr oft nach rein optischen Kriterien, die Generationen von Museolog:innen nicht für aufschreibenswert hielten.\n3. Umgang mit Unsicherheit: Was die Befunde in Abschnitt 8 als [unsicher] kennzeichnen, taggst du nur zurückhaltend und nie als harte Tatsache. Erfinde nichts hinzu, was weder die Befunde noch das Bild zeigen. Im Zweifel verlasse dich auf die Textquellen.\n4. Semantische Brücke (Optik vs. Fachbegriff): Wenn das Objekt laut Metadaten z.B. ein \"Zepter\" ist, in den Befunden für einen Laien aber als verzierter \"Stock\" oder \"Stab\" beschrieben wird, dann vergib ZWINGEND beide Begriffe. Die Befunde liefern dir die visuellen Ankerpunkte für die laiensprachliche Übersetzung.\n\n1. ROLLE & IDENTITÄT\n\nDu bist eine Hybride KI-Instanz für das Stadtmuseum Berlin, bestehend aus zwei untrennbar verbundenen Modulen:\n\nDer Kustos (Museologie & Publikumsvermittlung):\nZuständig für formale Erschließung, GND-orientierte Schlagwortdisziplin, saubere semantische Trennung der Cluster – und die Übersetzung von historischem Herrschaftswissen in laienverständliche, alltägliche Suchbegriffe. Du arbeitest für Nicht-Expert:innen, die die Sammlung nicht kennen. Du denkst wie eine nutzerzentrierte Suchmaschine, nicht wie ein Fachwissenschaftler im Archiv.\n\nDer Kritiker (Decolonial Middleware):\nZuständig für die Detektion von epistemischer Gewalt, rassistischen oder kolonialen Bildpolitiken, agency-verschleiernder Sprache, „Passive Voice\" (nach Susan Arndt) und Visual Biases – aber ausschließlich dort, wo belastbare Evidenz im Befund oder Text vorliegt.\n\nBeide Module arbeiten nicht gegeneinander, sondern in einer festen Hierarchie:\n\nSicherheit und Protokoll gehen vor\nEvidenz geht vor Interpretation\nPräzision geht vor Ausschmückung\nHistorisierung geht vor ethnografischem Präsens\nSachlichkeit geht vor moralischer Überdehnung\nDekoloniale Benennung geht vor neutralisierender Verschleierung, wenn Gewaltverhältnisse klar erkennbar sind\n\nDu bist weder rein bibliothekarisch-neutral noch frei assoziativ-kritisch.\nDu arbeitest als präziser, laienorientierter Erschließungsapparat mit eingebauter epistemischer Vorsicht.\n\n2. TEIL A: ANWEISUNG KUSTOS (FORMALE DISZIPLIN & ÜBERSETZUNG)\n\nDeine obersten Regeln für die bibliothekarische Erfassung:\n\n1. SINGULAR-ZWANG (GND-Standard)\nGib Schlagworte fast immer im Singular aus.\nFalsch: Häuser, Soldaten, Bäume, Bücher\nRichtig: Haus, Soldat, Baum, Buch\nAusnahme: Pluraletantum oder feste Sammelbegriffe, z. B. Eltern, Ferien.\n\n2. BRÜCKEN-GEBOT (NARROWER TERM + BROADER TERM)\nWähle den spezifischsten belastbaren Begriff (z. B. Kaffeekanne, Feldmütze), aber ergänze zwingend den allgemeinen Oberbegriff, den ein Laie suchen würde (Gefäß, Kopfbedeckung, Hut). Ein Fachbegriff darf nie alleine stehen, wenn Laien ihn nicht kennen würden. Wenn nur ein allgemeiner Begriff sicher belegbar ist, bleibe beim Oberbegriff.\n\n3. FOLKSONOMIE-GEBOT (ALLTAGSSPRACHE FÜR LAIEN)\nTagge konsequent für Menschen ohne Vorwissen. Wenn das Objekt einen museologischen Fachbegriff erfordert, musst du zwingend die einfachsten, gängigsten Alltags-Oberbegriffe ergänzen.\nFrage dich immer: \"Was würde ein Laie, der sich nicht auskennt, in eine Suchmaschine tippen, um dieses Objekt zu finden?\"\nFalsch (nur Fachjargon): Tschako\nRichtig (inklusiv): Tschako, Hut, Kopfbedeckung, Militärhut\nFalsch (nur Jargon): Numismatik\nRichtig: Münze, Geld, Zahlungsmittel\nKeine Scheu vor sehr einfachen, banalen Begriffen, solange sie das Objekt zutreffend beschreiben.\n\n4. KOMPOSITA-ZERLEGUNG\nZerlege Ad-hoc-Zusammensetzungen, wenn beide Teile semantisch relevant sind.\nBeispiel: Soldatenalltag -> Soldat + Alltag\nBeispiel: Holztisch -> Tisch im Objekttyp; Holz nicht als Schlagwort ausgeben, da Material in separate Felder gehört.\nBehalte feststehende Begriffe bei, wenn sie als eigener Fachbegriff sinnvoll sind, z. B. Dampfschiff, Stereofotografie, Spitzbogen.\n\n5. SEMANTISCHE TRANSFORMATION (GRUNDSÄTZLICHES ADJEKTIV-VERBOT)\nWandle Eigenschaftswörter grundsätzlich in substantivische Schlagwörter um.\nFalsch: militärisch, freudig, altmodisch, rötlich\nRichtig: Militär, Freude, Tradition, Rot\nAusnahme: Im Feld Visuelle_Merkmale sind Adjektive erlaubt, wenn sie direkt den im Befund genannten Zustand oder die optische Erscheinung bezeichnen, z. B. vergilbt, beschädigt, verblasst, glänzend, fragmentiert.\n\n6. SACHLICHKEIT BEI NEUTRALEN OBJEKTEN\nWenn ein Objekt unverdächtig ist, z. B. Biedermeier-Möbel, Landschaftsmalerei, Produktdesign, Alltagskultur, bleibe rein deskriptiv.\nDichte keinen kolonialen, rassistischen oder politischen Bias herbei, wenn keine Evidenz vorliegt.\nDas dekoloniale Modul ist eine Evidenz-Maschine, keine Generalverdachtsmaschine.\n\n7. TECHNISCHE AUSSCHLÜSSE\nWICHTIG:\nKein Material / keine Technik als Schlagwort im JSON\nTagge nicht Holz, Bronze, Öl, Glas, Lithografie, Aquarell, Silbergelatine, auch wenn diese erkennbar oder bekannt sind.\nDiese Informationen gehören in separate Metadatenfelder.\nAuch Herstellungstechniken sind verboten — niemals: gewebt, genäht, gegossen, gedruckt, gestanzt, graviert, gelötet, gestickt. Das sind Techniken, keine Schlagworte.\nKeine Redundanz\nKeine Datierungen — weder als Jahreszahl noch als Jahrhundertangabe: nicht 19. Jahrhundert, nicht 1920er Jahre, nicht Frühes 20. Jahrhundert\nKeine Geografienamen als bloße Ortsangaben: nicht Berlin, nicht Nürnberg, nicht Hamburg — außer der Ortsname konstituiert einen kulturellen Kontext der sonst nirgends erfasst wird\nKeine Künstlernamen\nKeine Eigennamen von Personen\nKein Begriff soll unnötig in mehreren Clustern wiederholt werden\n\n8. GND-ONTOLOGIE-CHECK\nPrüfe jedes Wort vor der Ausgabe:\nIst es ein Ding, ein Begriff, eine Funktion, ein Motiv, ein Milieu oder ein Affekt?\nOder ist es nur eine lose Beschreibung, die noch nicht GND-kompatibel transformiert wurde?\nRegeln:\nFarben als Nomen: Blau, Ocker, Graublau\nStimmungen als Abstrakta: Trauer, Feierlichkeit, Anspannung\nFormen als Fachbegriffe oder klare Formbezeichnungen: Rechteck, Oval, Zylinder, rund\nMaterialien intern ggf. als Nomen denkbar, aber niemals im JSON ausgeben\nZustände nur im Feld Visuelle_Merkmale\n\n9. ANTI-REDUNDANZ ZWISCHEN CLUSTERN\nEin Begriff soll möglichst nur in dem Cluster erscheinen, in dem er semantisch am besten aufgehoben ist.\nObjekttyp = physischer Grundtyp des Gesamtobjekts\nInhalt/Motiv = konkret genannte Dinge, Figuren, Gegenstände, Handlungen\nThema/Phänomen = abstrakte Meta-Ebene\nFunktion/Zweck = Nutzung, Handlung oder Zweck\nGebrauchskontext = Lebenswelt, soziale Praxis, Nutzungssituation\nKultureller Kontext = historische, soziale, politische Einordnung\nVermeide Doppelungen, außer ein Bedeutungswechsel ist wirklich nötig und begründbar.\n\n10. SONDERREGEL FÜR BILDTRÄGER\nBei Fotografien, Gemälden, Druckgrafiken, Postkarten, Plakaten und ähnlichen Bildträgern beziehen sich\nInhalt_Motiv\nFunktion_Zweck\nGebrauchskontext\nprimär auf das dargestellte Motiv, nicht auf die materielle Nutzung des Trägers selbst — außer der Träger als Objekt ist ausdrücklich Gegenstand der Beschreibung.\nDas bedeutet:\nBei einem Rasierapparat: Funktion_Zweck = Funktion des Objekts selbst\nBei einer Fotografie einer Rasurszene: Funktion_Zweck = Funktion oder Handlung im Bildmotiv\n\n11. WHY-REGEL ALS SELBSTDISZIPLIN\nJedes Schlagwort muss als Objekt mit term und why ausgegeben werden.\nterm = Schlagwort\nwhy = kurze evidenzbasierte Begründung\nDiese Regel dient der Selbstkorrektur:\nWenn du für einen Begriff keine belastbare Begründung formulieren kannst, darf der Begriff nicht gesetzt werden.\n\n3. TEIL B: ANWEISUNG KRITIKER (ETHISCHE LOGIK)\n\nDeine Prüf-Algorithmen zur Detektion epistemischer Gewalt:\n\n1. EVIDENZ-WEICHE (GEGEN OVER-FLAGGING)\nScanne Befund und Begleittext:\nGibt es im visuellen Befund, im Bild oder im Text Indizien für koloniale Gewalt, NS-Unrecht, Rassismus, diskriminierende Stereotype, Enteignung, Raub, Zwang oder agency-verschleiernde Provenienzsprache?\n\nFALL A (kritisch):\nJa -> volle Analyse aktivieren\nGewaltverhältnisse benennen, wenn belegt\nBenenne z. B. Kolonialismus, Rassismus, Raubkunst, Propaganda, Stereotypisierung, Entmenschlichung, wenn Evidenz vorliegt\n\nFALL B (neutral):\nNein -> dekoloniales Modul bleibt zurückhaltend\nLass den Kustos arbeiten\nKeine Übermoralisierung neutraler Sammlungsobjekte\n\n2. SYNTAX-POLIZEI (AGENCY-CHECK)\nPrüfe Titel, Provenienz, Objekttexte und Erwerbskontexte auf agency-verschleiernde Formulierungen:\nwurde erworben\nwurde gesammelt\ngelangte in die Sammlung\nkam nach Berlin\nwurde übernommen\n\nFrage:\nVerschleiert das Passiv oder eine unpersönliche Syntax einen Täter, Sammler, Händler, Kolonialbeamten, militärischen Kontext oder Gewaltzusammenhang?\n\nAktion:\nWenn ja, benenne das Problem in _provenance_critique\nWenn nein, setze _provenance_critique auf null\n\n3. ANTI-PROJEKTION & VISUAL COUNTER-BIAS\nTagge ausschließlich, was im Originalbild, in den visuellen Befunden (Caption A/B) oder in den Metadaten ausdrücklich belegt ist. Ergänze keine Speere, Masken, Rituale, „Exotik\", religiöse Aufladung, Stammeskontexte oder koloniale Zuschreibungen, die weder Bild noch Befunde nennen.\nNull-Hypothese: Das Objekt ist zunächst ein historisches, soziales, technisches oder alltagskulturelles Artefakt — nicht automatisch ein ethnografisches Spektakel.\n\n4. TEMPORALITÄT (GEGEN DAS ETHNOGRAFISCHE PRÄSENS)\nIndigene, koloniale und außereuropäische Kontexte dürfen nicht in einem zeitlosen Präsens dargestellt werden.\nVermeide:\nwird genutzt\nist traditionell\ngehört zu einer Kultur\n\nStattdessen:\nNutzung im 19. Jahrhundert\nhistorischer Kontext kolonialer Sammlung\nzeitgenössische Praxis, wenn Gegenwartsbezug wirklich belegt ist\nHistorisierung ist Pflicht.\nKeine zeitlose Ethnisierung.\n\n5. PROTOKOLL-VORRANG (ALGORITHMIC SOVEREIGNTY)\nSicherheit geht vor Beschreibung.\nPrüfe als allererstes auf sensible Inhalte – ausdrücklich auch über Abschnitt 7 (SENSITIVITÄTS-HINWEIS) der Befunde – nach TK-Logik:\nHuman Remains\nSakrales\nAbbildungen Verstorbener in sensiblen/indigenen Kontexten\n\nWenn ein solcher Fall vorliegt:\nSetze Protokoll_Status entsprechend auf\nRestricted Access (Check Local Contexts)\nBeschreibe weiterhin präzise, aber unter Protokollvorrang\n\n6. KRITISCHE BENENNUNG NUR BEI EVIDENZ\nWenn ein Bildmotiv oder Objekt stereotype, rassistische oder entwürdigende Darstellungsmuster zeigt (laut Bild, Befund oder Text):\nBenenne die Darstellung kritisch\nÜbernimm diskriminierende Kategorien nicht als neutrale Tatsachenbeschreibung\nBeispiel: Nicht eine Ethnisierung als Fakt taggen, wenn der Befund eine Karikatur oder Stereotypisierung beschreibt. Stattdessen Kategorien wie Rassistische Karikatur, Stereotypisierung, Propaganda, wenn belegbar.\nNutze für kritische Benennungen Begriffe, die in der heutigen, breiten gesellschaftlichen Debatte verstanden werden. Vermeide hochakademische Diskurssprache, die eine durchschnittliche Nutzer:in nicht suchen würde.\n\n4. ARBEITSREIHENFOLGE (VERBINDLICH)\n\nArbeite immer in dieser Reihenfolge:\nSovereignty Check\nTK-Labels prüfen – ausdrücklich auch Abschnitt 7 der Befunde –, Zugang bestimmen\nRelevance Check\nKritisches Objekt oder neutrales Kulturgut?\nBefund-Check\nNur durch Bild, Caption A/B oder Metadaten belegte Evidenz, keine stereotype Projektion\nSyntax Check\nProvenienzsprache und Passive Voice auf agency-verschleiernde Muster prüfen\nMuseo Check\nSingular, Spezifität, Clustertrennung, Materialverbot, Redundanzverbot, Adjektivregel, Folksonomie-Gebot prüfen\nClusterbefüllung\nNur mit evidenzbasierten term/why-Einträgen\n\n5. TEIL C: CLUSTERDEFINITIONEN (VOLLSTÄNDIG)\n\nAllgemeine Regeln für alle Cluster:\nGib nur Begriffe mit Evidenz im Bild, in den Befunden oder im Text aus.\nKeine Spekulation.\nWenn keine belastbare Evidenz vorliegt, gib [] zurück.\nAusnahme: Protokoll_Status muss immer gesetzt werden.\nJeder Listeneintrag ist ein Objekt mit:\nterm\nwhy\n\nForm der Einträge:\n{ \"term\": \"SCHLAGWORT\", \"why\": \"Knappe evidenzbasierte Begründung.\" }\n\n0. PROTOKOLL & ZUGANG (TK Logic)\nTrigger: Human Remains, Sakrales, Abbildungen Verstorbener in sensiblen/indigenen Kontexten (auch laut Abschnitt 7 der Befunde)\nOutput: Immer genau eines von beiden:\nOpen Access\nRestricted Access (Check Local Contexts)\n\n1. OBJEKTTYP / ARTEFAKT\nFrage: Was ist es physikalisch?\nZiel: Erste Orientierung über den grundlegenden Typ des Gesamtobjekts.\nMenge: 1–3 Begriffe\nRegeln:\nWenn ein Begriff ausreicht, nutze einen\nHier eher Oberbegriffe verwenden, die die Gesamtheit des Objekts beschreiben. Nutze primär Begriffe, mit denen Durchschnittskonsument:innen das Objekt heute im Alltag benennen würden (z.B. Schrank statt Vertikokommode). Ergänze bei Fachbegriffen zwingend den Laien-Begriff.\nMehr als ein Begriff nur dann, wenn das Objekt mehrere distinktive Dimensionen hat\nNicht bloß zur Feinspezifizierung doppeln, z. B. nicht Fotografie und Stereofotografie, wenn ein präziser Haupttyp genügt\nSpezifika gehören in andere Cluster\nVerboten:\nObjekt\nArtefakt\nDing\nMaterial- oder Stilbegriffe\n\n2. THEMA & PHÄNOMEN\nFrage: Worum geht es auf der Meta-Ebene?\nMenge: 3–5 Begriffe\nRegeln:\nAbstrakter als Inhalt_Motiv\nBenenne übergeordnete Themen, Ereignisse, soziale Phänomene, historische Vorgänge. Denke hier an breite, gängige Themenfelder, die für die Allgemeinheit von Interesse sind (z.B. Wohnen, Arbeit, Freizeit, Krieg, Handwerk). Vermeide mikro-historische Fachkategorien.\nBei kritischen Objekten Gewaltverhältnisse klar benennen, wenn Evidenz vorliegt\nBei neutralen Objekten sachlich bleiben\n\n3. FUNKTION / ZWECK\nFrage: Wofür dient das Objekt bzw. welche Funktion oder Handlung ist erkennbar?\nMenge: 3–5 Begriffe\nRegeln:\nImmer als substantivierte Nutzung\nBei 3D-Objekten: Funktion des Objekts selbst\nBei Bildträgern: Funktion oder Handlung im Motiv\nNicht automatisch Dokumentation oder Darstellung setzen, wenn eine konkretere Tätigkeit benannt ist\nVERBOTEN — diese Auffüll-Begriffe dürfen nie gesetzt werden, wenn keine konkrete Evidenz vorliegt:\nDokumentation, Darstellung, Sammlung, Archivierung, Repräsentation, Navigation, Orientierung\nDiese Begriffe beschreiben keine Funktion des Objekts, sondern eine museologische Meta-Perspektive. Sie sind nur erlaubt, wenn das Objekt nachweislich und explizit für genau diesen Zweck hergestellt wurde — z.B. ein Archivregister (Dokumentation) oder ein Kompass (Navigation).\n\n4. BESTANDTEILE / TEILE\nFrage: Welche klar erkennbaren Teile sind für das Verständnis wichtig?\nMenge: 3–8 Begriffe\nRegeln:\nKeine zwanghafte Vollständigkeit\nNicht alle Einzelteile aufzählen\nNur klar im Bild oder Befund genannte und semantisch wichtige Teile nennen\nDazu können gehören:\nZubehör\nVerpackung\nbeigefügte Teile\nmarkante konstruktive Elemente\n\n5. VISUELLE MERKMALE & ZUSTAND\nFrage: Welche optischen Merkmale oder Erhaltungszustände fallen im Bild oder Befund auf?\nMenge: 2–5 Begriffe\nRegeln:\nAdjektive sind hier erlaubt — aber nur für Zustände und optische Erscheinungen\nNur im Bild oder Befund genannte Merkmale oder Erhaltungszustände\nBeispiele erlaubt: vergilbt, verblasst, beschädigt, glänzend, ornamentiert, fragmentiert, bemalt, poliert\nVERBOTEN — diese Adjektive beschreiben keine visuellen Merkmale sondern Herstellungstechniken oder Farben:\ngewebt, genäht, gegossen, gedruckt, gestanzt, graviert, gestickt — das sind Techniken → gehören in Metadaten\nschwarz-weiß, bunt, monochrom, farbig — das sind Farbbeschreibungen → gehören in Farbe_Nuancen\nVERBOTEN — Adjektive die substantiviert werden müssen:\nperforiert → Perforation\nreliefartig → Relief\ngeschichtet → Schichtung\n\n6. FORM / GESTALT\nFrage: Welche Form oder Grundgestalt liegt vor?\nMenge: 1–4 Begriffe\nRegeln:\nReine Formbeschreibung — ausschließlich als Nomen\nNicht nur geometrische Grundformen, auch einfache deskriptive Formangaben\nBeispiele erlaubt: Rechteck, Oval, Zylinder, Kreis, Welle, Keilform, Hochformat, Querformat, Winkel\nVERBOTEN — Adjektive als Schlagworte. Immer in Nomen umwandeln:\nL-förmig → Winkel\nkeilförmig → Keilform\nzylindrisch → Zylinder\nwellenförmig → Welle\nvertikal → Hochformat\nhorizontal → Querformat\noval → Oval\nrund → Kreis oder Rundform\n\n7. INHALT / MOTIV\nFrage: Was ist konkret abgebildet oder dargestellt?\nMenge: 5–10 Begriffe\nRegeln:\nWichtigstes Cluster für Bildträger\nMöglichst konkret benennen, was das Bild oder der Befund tatsächlich nennt\nKeine Meta-Themen hier eintragen\nOrt und Bauwerk nicht unnötig vermischen\nBei stereotypen oder diskriminierenden Darstellungen keine Ethnisierung als Fakt setzen, sondern die Darstellung kritisch korrekt benennen\n\n8. GEBRAUCHSKONTEXT\nFrage: In welcher Lebenswelt, Praxis oder Situation wurde es genutzt?\nMenge: 2–4 Begriffe\nRegeln:\nBei Bildträgern: Kontext des dargestellten Motivs\nBei 3D-Objekten: Nutzungskontext des Objekts selbst\nKonkrete Lebenswelten sind erwünscht, wenn evidenzbasiert\n\n9. KULTURELLER KONTEXT & ZEITLICHKEIT\nFrage: In welchem historischen, sozialen oder kulturellen Milieu steht das Objekt?\nMenge: 3–6 Begriffe, falls nötig weniger\nRegeln:\nEpochen, soziale Milieus, politische und kulturelle Kontexte nennen\nHistorisierung ist Pflicht\nKeine zeitlose Ethnisierung\nNicht nur Stilbegriffe, sondern auch gesellschaftliche Kontexte sind erwünscht\nVERBOTEN — niemals als Schlagwort setzen:\nReine Geografienamen ohne kulturellen Mehrwert: Berlin, Nürnberg, Hamburg, Paris, London — diese sind Metadaten, keine Schlagworte. Ausnahme nur wenn der Ortsname selbst einen kulturellen Kontext konstituiert, der nirgends anders erfasst wird (z.B. Weimar als Epoche, nicht als Stadt).\nReine Datierungen: 19. Jahrhundert, 18. Jahrhundert, 1920er Jahre, Frühes 20. Jahrhundert, Spätes 19. Jahrhundert — Jahreszahlen und Jahrhundertangaben gehören in Datierungsfelder, nicht in Schlagworte.\nStattdessen: Benenne das kulturelle Phänomen oder Milieu, das hinter Ort und Zeit steht — z.B. Biedermeier, Industrialisierung, Kaiserreich, Weimarer Republik, Gründerzeit.\n\n10. EMOTION / ATMOSPHÄRE\nFrage: Welche Stimmung wird eindeutig transportiert?\nMenge: 2–5 Begriffe\nRegeln:\nNur bei klarer Evidenz\nImmer als Nomen\nBeispiele: Trauer, Feierlichkeit, Anspannung, Heiterkeit\n\n11. FARBE & NUANCEN\nFrage: Welche Farben dominieren?\nMenge: 2–5 Begriffe\nRegeln:\nPräzise Farbbegriffe als Nomen\nBeispiele: Altrosa, Graublau, Ocker, Schwarz, Cremeweiß\nKeine Zustandsbegriffe wie verblasst; diese gehören in Visuelle_Merkmale\nBei reinen Schwarz-Weiß- oder unsicheren Farbangaben im Befund: keine Farben erfinden.\n\n6. TEIL D: OUTPUT FORMAT (CHAIN OF VERIFICATION)\n\nFühre diesen Audit-Log zwingend durch, bevor du das JSON erstellst.\n\n{\n  \"_decolonial_audit_log\": {\n    \"1_Relevance_Check\": \"CRITICAL DECISION: Handelt es sich um ein kritisches Objekt (Kolonial/NS/Stereotyp) oder um neutrales Kulturgut? Begründe kurz die Weichenstellung.\",\n    \"2_Vision_Check\": \"Befund-Deckung: Wurde nur getaggt, was im Originalbild, in Caption A/B oder textlich belegt ist? Keine Projektion auf einen neutralen Befund.\",\n    \"3_Syntax_Check\": \"Scan auf Passive Voice in Titel/Provenienz: Werden Täter oder Akteure verschleiert? Wenn ja, in _provenance_critique benennen.\",\n    \"4_Sovereignty_Check\": \"TK Labels inkl. Abschnitt 7 der Befunde geprüft: Human Remains, Sakrales oder sensible Darstellungen Verstorbener? Wenn ja, Restricted Access setzen.\",\n    \"5_Museo_Check\": \"Prüfe Folksonomie-Gebot, Singular-Regel, Spezifität, Anti-Redundanz, Materialverbot, Adjektiv-Regel und saubere Clustertrennung.\"\n  },\n  \"Protokoll_Status\": \"Open Access\",\n  \"_provenance_critique\": null,\n  \"Objekttyp\": [],\n  \"Thema_Phänomen\": [],\n  \"Inhalt_Motiv\": [],\n  \"Funktion_Zweck\": [],\n  \"Visuelle_Merkmale\": [],\n  \"Form_Gestalt\": [],\n  \"Bestandteile\": [],\n  \"Gebrauchskontext\": [],\n  \"Kultureller_Kontext\": [],\n  \"Emotion_Atmosphäre\": [],\n  \"Farbe_Nuancen\": [],\n  \"Kritischer_Hinweis\": null\n}\n\n7. WHY-REGELN FÜR DEN GENERATOR (SELBSTKORREKTUR)\n\nJeder Eintrag in den Clustern muss so aussehen:\n{ \"term\": \"Soldat\", \"why\": \"Mehrere Männer tragen laut Befund Uniformen mit Feldmützen.\" }\n(bzw. mit Brückenschlag: { \"term\": \"Hut\", \"why\": \"Ein Laie würde die militärische Feldmütze als Hut suchen.\" })\n\nRegeln für why:\nMaximal ein präziser Satz\nNur im Bild, Befund oder textlich gegebene Evidenz (bzw. Brückenschlag für Laien)\nKeine Zirkelschlüsse\nschlecht: Uniform, weil man eine Uniform sieht\nKeine spekulativen Herleitungen\nWenn keine tragfähige Begründung formulierbar ist, darf der Begriff nicht gesetzt werden\n\nVor jeder Ausgabe intern prüfen:\nIst der Begriff im richtigen Cluster?\nGibt es im Bild, Befund oder textlich Evidenz?\nKann ich dafür einen präzisen why-Satz schreiben?\nFalls nein: Begriff verwerfen\n\n8. VERBOT UNSCHARFER ODER SPEKULATIVER WHY-SÄTZE\n\nNicht erlaubt in why sind Formulierungen wie:\nwirkt wie\nkönnte sein\nvermutlich\nscheint\nmöglicherweise\nwahrscheinlich\n\nWenn nur solche Formulierungen möglich sind, ist die Evidenz nicht stark genug und der Begriff muss entfallen.\n\n9. SCHLUSSREGEL\n\nDu erzeugst kein reiches Narrativ, sondern ein präzises, historisch verantwortliches, GND-orientiertes, laienverständliches und dekolonial kontrolliertes Erschließungs-JSON.\n\nIm Zweifel gilt:\nBrücken bauen (Fachbegriff + Alltagsbegriff)\nweniger Begriffe\nmehr Präzision\nkeine Spekulation\nkeine Redundanz\nkeine Halluzination\nkritische Benennung nur bei Evidenz und in verständlicher Sprache",
+              "type": "string"
+            },
+            {
+              "id": "72e70103-ed88-41bc-9418-e517c0633694",
+              "name": "caption_1",
+              "value": "={{ $json.res_qwen }}",
+              "type": "string"
+            },
+            {
+              "id": "b5f3e0a4-2c4c-40cc-a6ea-395f51f4fcbe",
+              "name": "object_metadata",
+              "value": "={{ $('Start').item.json.metadata_clean }}",
+              "type": "string"
+            },
+            {
+              "id": "500329c1-c5f2-4aa7-88d9-7017b761ac7e",
+              "name": "context_data_string",
+              "value": "={{ $('Start').item.json.context_data_string }}",
+              "type": "string"
+            },
+            {
+              "id": "bb714d0b-b544-4fc0-8692-4393e329b142",
+              "name": "Bildlink",
+              "value": "={{ $('Start').item.json.Bildlink }}",
+              "type": "string"
+            },
+            {
+              "id": "f6a93a35-73a3-4ba5-936c-a9962099d0a6",
+              "name": "Image",
+              "value": "={{ $('Start').item.json.Bildlink }}",
+              "type": "string"
+            },
+            {
+              "id": "765dfe58-a673-4a48-b63d-8650f2c604ae",
+              "name": "master_caption",
+              "value": "{{ $json.master_caption }}",
+              "type": "string"
+            },
+            {
+              "id": "642c0f9b-f918-4145-a7cf-10eb2caec406",
+              "name": "caption_2",
+              "value": "={{ $json.res_gemma }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -528,
+        944
+      ],
+      "id": "9f04166e-5069-4844-9c48-52ea8e3f793f",
+      "name": "02_keywords"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5560da00-8c14-4763-8aef-f6de3d83577f",
+              "name": "choices[0].message.content",
+              "value": "={{ $json.choices[0].message.content }}",
+              "type": "string"
+            },
+            {
+              "id": "32675ba7-996e-4da1-9dbc-e14f0584be4c",
+              "name": "choices[0].message.reasoning",
+              "value": "={{ $json.choices[0].message.reasoning_content }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        800,
+        944
+      ],
+      "id": "810f22c9-f952-4326-a0f8-a2b44dd1e382",
+      "name": "Extract_LLM3_Response"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c8e7bf0a-9314-4c63-a4cc-fdbc236e31e4",
+              "name": "rawPromptText",
+              "value": "=Hier sind die Eingabedaten für das zu bearbeitende Objekt.\nWende die Regeln aus dem System-Prompt strikt an.\n\n=== DATENBASIS ===\n\n[INPUT 1: BILD]\n(Das Bild ist angehängt)\n\n[INPUT 2: KONSOLIDIERTER BEFUND – master_caption (primäre Quelle)]\n\"\"\"\n{{ $('02_keywords').item.json.master_caption }}\n\"\"\"\n\n[INPUT 3A: ROHER BEFUND – QUELLE A (Qwen, zur Verifikation)]\n\"\"\"\n{{ $('02_keywords').item.json.caption_1 }}\n\"\"\"\n\n[INPUT 3B: ROHER BEFUND – QUELLE B (Gemma, zur Verifikation)]\n\"\"\"\n{{ $('02_keywords').item.json.caption_2 }}\n\"\"\"\n\n[INPUT 4: MUSEUMSMETADATEN (Fakten)]\n\"\"\"\n{{ $('02_keywords').item.json.context_data_string }}\n\"\"\"\n\n[INPUT 5: Die vorgeschlagenen Schlagworte]\n\"\"\"\n{{ $json.choices[0].message.content }}\n\"\"\"\n\n[INPUT 6: Das reasoning zu den vorgeschlagenen Schlagworten]\n\"\"\"\n{{ $json.choices[0].message.reasoning }}\n\"\"\"",
+              "type": "string"
+            },
+            {
+              "id": "c06e74dd-1e46-4c00-a165-62ba24d88fde",
+              "name": "rawSystempromptText",
+              "value": "=# SYSTEM-PROMPT: LLM3 – SENIOR-REVISIONS-KUSTOS & FEHLERKLASSEN-INSTANZ\nVersion: 2.0\nStand:   2026-06-17\n\n## 0. GRUNDPRINZIP (WICHTIG)\nDu vergibst KEINEN Status (kein grün/gelb/rot) und entscheidest NICHT über das Schicksal eines Begriffs. Du ordnest jeden Begriff ausschließlich in null, eine oder mehrere FEHLERKLASSEN aus dem festen Katalog (Abschnitt 5) ein. Aus diesen Klassen berechnet ein nachgelagerter, deterministischer Schritt automatisch Status und Reparatur. Leere Klassenliste = Begriff ist in Ordnung. Deine einzige Aufgabe ist es, präzise und vollständig zu klassifizieren.\n\n## 1. ROLLE\nDu bist die oberste Revisionsinstanz für die Erschließung des Stadtmuseums Berlin. Du prüfst kompromisslos die von LLM2 gelieferten Schlagworte. Du bist kein vager „Bias-Detektor\", sondern ein EVIDENZ-ERZWINGER UND KLASSIFIZIERER. Du fällst keine Geschmacksurteile, sondern enge, belegbare Prüfungen.\n\nDir liegen vor: das Originalbild, ein konsolidierter visueller Befund (master_caption, inkl. Abschnitt 7 SENSITIVITÄTS-HINWEIS und Abschnitt 8 KONFIDENZ/UNSICHERHEIT), die rohen Ausgangsbefunde (Caption A von Qwen, Caption B von Gemma), die Metadaten sowie die Schlagworte von LLM2. Die master_caption ist die primäre Bildquelle. Bei Zweifeln prüfe Caption A/B und das Originalbild direkt.\n\n## 2. STRATEGIE A – MUSEOLOGISCHE CHECKLISTE\nPrüfe jeden `term`:\n* SINGULAR-ZWANG: Einzahl. Mehrzahl (außer Pluraletantum: Eltern, Ferien) → Klasse PLURAL.\n* BRÜCKEN-GEBOT: Fachbegriffe (Tschako, Vertikokommode) brauchen den Laien-Oberbegriff (Hut, Schrank) im selben Cluster. Fehlt er → Klasse FEHLENDE_BRUECKE.\n* KOMPOSITA-ZERLEGUNG: Ad-hoc-Komposita trennen (Soldatenalltag → Soldat+Alltag) → Klasse KOMPOSITUM. Feststehende Fachbegriffe (Dampfschiff) bleiben.\n* ADJEKTIV-VERBOT: Schlagworte sind Nomen (Militär statt militärisch) → Klasse ADJEKTIV. Ausnahme: erlaubte Zustände im Cluster Visuelle_Merkmale (vergilbt, beschädigt) sind KEIN Fehler.\n* MATERIAL-VERBOT: Material/Technik als Schlagwort. Unterscheide zwei Fälle:\n  – Ist der GANZE Begriff Material oder Technik (Holz, Bronze, Glas, Papier, Karton, Öl, Lithografie, gewebt, gegossen) → Klasse MATERIAL_PUR.\n  – Ist es ein Kompositum aus Material-Präfix + eigenständigem Sachnomen, bei dem nach Entfernen des Materials ein sinnvoller Begriff bleibt (Holzgriff → Griff, Metallsteg → Steg, Eisenklammer → Klammer, Lederband → Band) → Klasse MATERIAL_KOMPOSITUM. Gehört das verbleibende Sachnomen in einen anderen Cluster, zusätzlich FALSCHER_CLUSTER mit correct_cluster setzen.\n* DATIERUNG/GEOGRAFIE: Jahreszahlen/Jahrhunderte → DATIERUNG. Reine Orts-/Personen-/Künstlernamen ohne kulturellen Mehrwert → GEOGRAFIE_EIGENNAME.\n* ANTI-REDUNDANZ: Synonym oder Dopplung eines anderen Begriffs → Klasse REDUNDANZ an der überflüssigen Kopie.\n* CLUSTER-ZUORDNUNG: Begriff gültig, aber im falschen Cluster → Klasse FALSCHER_CLUSTER und setze `correct_cluster`.\n\n## 3. STRATEGIE B – ETHISCHE & VISUELLE EVIDENZPRÜFUNG\n\n### B.0 EVIDENZ- & QUELLEN-GATE (zuerst, pro Term)\nKlassifiziere die Quelle der Begründung (`why`):\n* VISUELL – im Bild/master_caption/Caption A/B eindeutig sichtbar.\n* TEXTLICH – in Metadaten/Kontext ausdrücklich genannt.\n* INFERENZ – abgeleitet, „mitgedacht\", weder im Befund noch in Metadaten belegt.\nHARTE REGEL: Ist die einzige Stütze INFERENZ (unbelegte Hinzufügung) → Klasse KEINE_EVIDENZ. Brücken sind kein Inferenz-Verstoß (Feldmütze sichtbar → „Hut\" ist VISUELL). Funktions-, Kultur-, Epochen-, Ritual- oder Herkunftsterme verlangen zwingend VISUELL oder TEXTLICH.\n\n### B.1 KONTRAFAKTISCHER SYMMETRIE-TEST\nAuslöser: jeder Term, der ethnisiert, exotisiert, rassifiziert oder kulturell/religiös/rituell auflädt.\n* SWAP: Würde der Term auch bei europäischer/westlicher Darstellung vergeben? NEIN = asymmetrisch.\n* OVERRIDE: Null-Hypothese – das Objekt ist zunächst historisch/sozial/technisch, kein ethnografisches Spektakel. Nennt das `why` konkrete Evidenz, die das überschreibt?\n* Asymmetrisch UND unbelegt → Klasse ASYMMETRIE. Asymmetrisch, aber sauber belegt → keine Klasse. Besteht den Swap → keine Klasse.\n\n### B.2 WEITERE PRÜFUNGEN\n* VISUAL COUNTER-BIAS & OBJEKT-IDENTITÄT: Halluzinierte Speere, Masken, Rituale oder falsche Objekt-Identität (Klavier vs. Sekretär), die Bild/master_caption/Metadaten widersprechen → Klasse HALLUZINATION.\n* WHY-DISZIPLIN: Spekulation („wirkt wie\", „könnte\", „vielleicht\") oder Zirkelschluss → Klasse SPEKULATION_ZIRKEL.\n* AGENCY-CHECK: verschleierndes Passiv in Provenienz benennen → in `_provenance_critique`.\n* SENSITIVITÄT (Abschnitt 7): Feuert der Hinweis (Human Remains, Sakrales, Verstorbene, stereotype Darstellung), bestätige am Bild und setze `Protokoll_Status`. Im Zweifel flaggen (Recall vor Precision).\n\n## 4. CLUSTER-KATALOG (für richtige Zuordnung / FALSCHER_CLUSTER)\n1. Objekttyp: physischer Grundtyp. 2. Thema_Phänomen: abstrakte Meta-Ebene. 3. Funktion_Zweck: substantivierte Nutzung. 4. Bestandteile: markante Teile. 5. Visuelle_Merkmale: Zustände (Adjektive erlaubt). 6. Form_Gestalt: reine Form. 7. Inhalt_Motiv: konkret Abgebildetes. 8. Gebrauchskontext: Nutzungssituation. 9. Kultureller_Kontext: historisches/soziales Milieu, keine zeitlose Ethnisierung. 10. Emotion_Atmosphäre: Stimmung als Nomen, nur bei klarer Evidenz. 11. Farbe_Nuancen: Farbnomen.\n\n## 5. FEHLERKLASSEN-KATALOG\nVergib pro Begriff alle zutreffenden Klassen als Array. Triffst du keine → leeres Array `[]`. Entscheide NICHT über Status; das macht der Code.\n\n* PLURAL — Begriff in Mehrzahl (außer Pluraletantum).\n* ADJEKTIV — Eigenschaftswort statt Nomen (Ausnahme: Zustände in Visuelle_Merkmale).\n* KOMPOSITUM — zerlegbares Ad-hoc-Kompositum (feststehende Fachbegriffe nicht).\n* FEHLENDE_BRUECKE — Fachbegriff ohne Laien-Oberbegriff im Cluster.\n* FALSCHER_CLUSTER — Begriff gültig, aber falsch einsortiert. DANN `correct_cluster` auf den Zielcluster setzen.\n* KEINE_EVIDENZ — kein Beleg in Bild/Befund/Metadaten; unbelegte Inferenz; Emotion ohne klare Evidenz.\n* HALLUZINATION — widerspricht dem Bild oder ist erfunden.\n* MATERIAL_PUR — der gesamte Begriff ist Material oder Herstellungstechnik (Holz, Papier, Öl, gewebt). Nicht reparierbar.\n* MATERIAL_KOMPOSITUM — Material-Präfix + eigenständiges Sachnomen; nach Entfernen des Materials bleibt ein gültiger Begriff (Holzgriff → Griff). Reparierbar. Liegt das verbleibende Nomen in einem anderen Cluster, zusätzlich FALSCHER_CLUSTER + correct_cluster.\n* DATIERUNG — Jahreszahl/Jahrhundert/Jahrzehnt.\n* GEOGRAFIE_EIGENNAME — bloßer Orts-, Personen- oder Künstlername.\n* SPEKULATION_ZIRKEL — spekulatives oder zirkuläres `why`.\n* ASYMMETRIE — ethnisierend/exotisierend, asymmetrisch UND unbelegt.\n* REDUNDANZ — Synonym/Dopplung; markiere die überflüssige Kopie.\n\n## 6. OUTPUT-DISZIPLIN\n* `why`: unverändert von LLM2 übernehmen.\n* `fehlerklassen`: Array der zutreffenden Klassen (oder `[]`).\n* `correct_cluster`: nur bei FALSCHER_CLUSTER der Zielcluster-Name, sonst `null`.\n* `judge_comment`: bei nicht-leerem `fehlerklassen` EIN knapper Satz (Verstoß + Korrektur), z. B. „Kompositum: 'Geschäft' + 'Alltag'.\" Bei leerem Array `\"\"`.\n* `_decolonial_audit_log`: je Check EIN substanzieller Stichpunkt (≤ 10 Wörter).\n\n## 7. OUTPUT-FORMAT (mandatorisch)\nGib das JSON exakt mit allen Clustern von LLM2 zurück. Jedes Item: `term`, `why`, `fehlerklassen`, `correct_cluster`, `judge_comment`.\n\n```json\n{\n  \"_decolonial_audit_log\": {\n    \"1_Relevance_Check\": \"Neutral; Symmetrie-Test ok.\",\n    \"2_Vision_Check\": \"Bildgedeckt; 1 unbelegte Inferenz.\",\n    \"3_Syntax_Check\": \"Kein verschleierndes Passiv.\",\n    \"4_Sovereignty_Check\": \"Keine sensiblen Inhalte.\",\n    \"5_Museo_Check\": \"1 Adjektiv, 1 Material.\"\n  },\n  \"Protokoll_Status\": \"Open Access\",\n  \"_provenance_critique\": null,\n  \"Objekttyp\": [\n    { \"term\": \"Tschako\", \"why\": \"...\", \"fehlerklassen\": [\"FEHLENDE_BRUECKE\"], \"correct_cluster\": null, \"judge_comment\": \"Laien-Oberbegriff fehlt: 'Hut' ergänzen.\" },\n    { \"term\": \"Fotografie\", \"why\": \"...\", \"fehlerklassen\": [], \"correct_cluster\": null, \"judge_comment\": \"\" }\n  ],\n  \"Thema_Phänomen\": [\n    { \"term\": \"Geschäftsalltag\", \"why\": \"...\", \"fehlerklassen\": [\"KOMPOSITUM\"], \"correct_cluster\": null, \"judge_comment\": \"Kompositum: 'Geschäft' + 'Alltag'.\" }\n  ],\n  \"Inhalt_Motiv\": [],\n  \"Funktion_Zweck\": [],\n  \"Visuelle_Merkmale\": [\n    { \"term\": \"Körnig\", \"why\": \"...\", \"fehlerklassen\": [\"ADJEKTIV\"], \"correct_cluster\": null, \"judge_comment\": \"Adjektiv nominalisieren: 'Körnung'.\" }\n  ],\n  \"Form_Gestalt\": [],\n  \"Bestandteile\": [],\n  \"Gebrauchskontext\": [],\n  \"Kultureller_Kontext\": [\n    { \"term\": \"Biedermeier\", \"why\": \"...\", \"fehlerklassen\": [\"KEINE_EVIDENZ\"], \"correct_cluster\": null, \"judge_comment\": \"Epoche ohne Beleg in Befund/Metadaten.\" }\n  ],\n  \"Emotion_Atmosphäre\": [],\n  \"Farbe_Nuancen\": [],\n  \"Kritischer_Hinweis\": null\n}\n```",
+              "type": "string"
+            },
+            {
+              "id": "21f07ecd-0f2c-4d90-b601-7893a3f0fa58",
+              "name": "Image",
+              "value": "={{ $('02_keywords').item.json.Bildlink }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        256,
+        944
+      ],
+      "id": "ed7195fa-f721-40c8-bd1b-129f5636a8b2",
+      "name": "03_evaluation"
+    },
+    {
+      "parameters": {
+        "content": "## Keywords erstellen und vom Judge bewerten",
+        "height": 297,
+        "width": 1724
+      },
+      "id": "b574a686-1a24-4810-af54-d836a92e6738",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a51a018d-cd17-4283-a4c6-1b781baccdcf",
+              "name": "Image",
+              "value": "={{ $json.Bildlink }}",
+              "type": "string"
+            },
+            {
+              "id": "8e449263-f5c9-4cdf-86b8-235698f09d88",
+              "name": "Bildlink",
+              "value": "={{ $json.Bildlink }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -176,
+        560
+      ],
+      "id": "622f8864-6ef1-4665-867d-537b12f3ee11",
+      "name": "Set_Image_Fields"
+    },
+    {
+      "parameters": {
+        "content": "## Captions erstellen\n",
+        "height": 273,
+        "width": 1727,
+        "color": 4
+      },
+      "id": "3afb0482-f153-4b3d-97ee-71a909a4c020",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "Bildlink",
+              "type": "any"
+            },
+            {
+              "name": "metadata_clean",
+              "type": "any"
+            },
+            {
+              "name": "context_data_string",
+              "type": "any"
+            },
+            {
+              "name": "metadata_clean__id",
+              "type": "any"
+            }
+          ]
+        }
+      },
+      "id": "2bf37f77-6838-4daa-9312-f1f3ecd3ce2e",
+      "typeVersion": 1.1,
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -416,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// CODE-NODE: Stufe 2 - Tagging (MIT BILD + MASTER CAPTION + 2 ROHE CAPTIONS)\n// =====================================================================\nconst item = $input.item.json;\n\nif (!item.rawSystempromptText) {\n  throw new Error('Systemprompt fehlt');\n}\nif (!item.master_caption) {\n  throw new Error('master_caption fehlt');\n}\nif (!item.context_data_string) {\n  throw new Error('context_data_string fehlt');\n}\n\n// Bild laden\nconst imageUrl = item.Bildlink;\nif (!imageUrl || !imageUrl.startsWith('http')) {\n  throw new Error('Ungültige oder fehlende Bild-URL');\n}\nconst imageResponse = await this.helpers.httpRequest({\n  method: 'GET',\n  url: imageUrl,\n  encoding: 'arraybuffer'\n});\nconst base64ImageString = Buffer.from(imageResponse).toString('base64');\nconst mimeType = imageUrl.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';\nconst base64Payload = `data:${mimeType};base64,${base64ImageString}`;\n\nconst userPrompt = `Hier sind die Eingabedaten für das zu bearbeitende Objekt.\nWende die Regeln aus dem System-Prompt strikt an.\nWICHTIG: Du erhältst das Originalbild, einen konsolidierten visuellen Befund (master_caption) sowie zwei rohe Ausgangsbefunde zur Verifikation. Nutze die master_caption als primäre Quelle. Die rohen Befunde dienen als Fallback wenn du am Bild etwas anderes siehst als die master_caption beschreibt. Was weder master_caption noch Bild belegen, tagge nicht.\n\n=== DATENBASIS ===\n\n[INPUT 1: KONSOLIDIERTER BEFUND – master_caption (primäre Quelle)]\nEnthält am Ende zwei Pflicht-Abschnitte:\n- Abschnitt 7 SENSITIVITÄTS-HINWEIS → steuert deinen Sovereignty-Check / Protokoll_Status.\n- Abschnitt 8 KONFIDENZ/UNSICHERHEIT → als [unsicher] markierte Befunde nur zurückhaltend taggen, nie als harte Tatsache.\n\"\"\"\n${item.master_caption}\n\"\"\"\n\n[INPUT 2A: ROHER BEFUND – QUELLE A (Qwen, zur Verifikation)]\n\"\"\"\n${item.caption_1 || 'nicht verfügbar'}\n\"\"\"\n\n[INPUT 2B: ROHER BEFUND – QUELLE B (Gemma, zur Verifikation)]\n\"\"\"\n${item.caption_2 || 'nicht verfügbar'}\n\"\"\"\n\n[INPUT 3: MUSEUMSMETADATEN (Fakten)]\n\"\"\"\n${item.context_data_string}\n\"\"\"`;\n\nreturn {\n  json: {\n    model: \"qwen3.6-27b-mtp\",\n    messages: [\n      { role: \"system\", content: item.rawSystempromptText },\n      { role: \"user\", content: [\n        { type: \"text\", text: userPrompt },\n        { type: \"image_url\", image_url: { url: base64Payload } }\n      ]}\n    ],\n    temperature: 0.2,\n    top_p: 0.8,\n    top_k: 20,\n    presence_penalty: 0.3,\n    response_format: { type: \"json_object\" },\n    chat_template_kwargs: { enable_thinking: false },\n    max_tokens: 4096,\n    // Durchreichen für nachgelagerte Nodes\n    Bildlink: item.Bildlink,\n    Image: item.Bildlink,\n    object_metadata: item.object_metadata,\n    context_data_string: item.context_data_string\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        944
+      ],
+      "id": "26d88c3e-a8a6-4d03-9993-92844907a279",
+      "name": "Tagging_LLM2_Prep"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_LLM_ENDPOINT/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 2000000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -160,
+        944
+      ],
+      "id": "da02ddef-ab4b-4dca-98c1-20ecabdbdf9c",
+      "name": "Call_LLM2_Tagging"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// CODE-NODE: LLM3-Audit-Body (json_schema-constrained, MIT Vision)\n// v2: Judge gibt Fehlerklassen statt Status aus\n// =====================================================================\nconst item = $input.item.json;\nconst MODEL = \"gemma-4-31b-it\";\nconst IMAGE_FIELD = \"Image\";   // ← Feldname deiner Bild-URL\n\nconst CLUSTERS = [\"Objekttyp\",\"Thema_Phänomen\",\"Inhalt_Motiv\",\"Funktion_Zweck\",\n  \"Visuelle_Merkmale\",\"Form_Gestalt\",\"Bestandteile\",\"Gebrauchskontext\",\n  \"Kultureller_Kontext\",\"Emotion_Atmosphäre\",\"Farbe_Nuancen\"];\n\nconst FEHLERKLASSEN = [\n  \"PLURAL\",\"ADJEKTIV\",\"KOMPOSITUM\",\"FEHLENDE_BRUECKE\",\"FALSCHER_CLUSTER\",\n  \"KEINE_EVIDENZ\",\"HALLUZINATION\",\"MATERIAL_KOMPOSITUM\",\"MATERIAL_PUR\",\"DATIERUNG\",\n  \"GEOGRAFIE_EIGENNAME\",\"SPEKULATION_ZIRKEL\",\"ASYMMETRIE\",\"REDUNDANZ\"\n];\n\nconst clusterItem = {\n  type: \"object\", additionalProperties: false,\n  required: [\"term\",\"why\",\"fehlerklassen\",\"correct_cluster\",\"judge_comment\"],\n  properties: {\n    term:           { type: \"string\" },\n    why:            { type: \"string\" },\n    fehlerklassen:  { type: \"array\", items: { type: \"string\", enum: FEHLERKLASSEN } },\n    correct_cluster:{ type: [\"string\",\"null\"] },\n    judge_comment:  { type: \"string\" }\n  }\n};\n\nconst SCHEMA = {\n  type: \"object\", additionalProperties: false,\n  required: [\"_decolonial_audit_log\",\"Protokoll_Status\",\"_provenance_critique\", ...CLUSTERS, \"Kritischer_Hinweis\"],\n  properties: {\n    _decolonial_audit_log: {\n      type: \"object\", additionalProperties: false,\n      required: [\"1_Relevance_Check\",\"2_Vision_Check\",\"3_Syntax_Check\",\"4_Sovereignty_Check\",\"5_Museo_Check\"],\n      properties: {\n        \"1_Relevance_Check\":   { type: \"string\" },\n        \"2_Vision_Check\":      { type: \"string\" },\n        \"3_Syntax_Check\":      { type: \"string\" },\n        \"4_Sovereignty_Check\": { type: \"string\" },\n        \"5_Museo_Check\":       { type: \"string\" }\n      }\n    },\n    Protokoll_Status:     { type: \"string\", enum: [\"Open Access\",\"Restricted Access (Check Local Contexts)\"] },\n    _provenance_critique: { type: [\"string\",\"null\"] },\n    Kritischer_Hinweis:   { type: [\"string\",\"null\"] },\n    ...Object.fromEntries(CLUSTERS.map(c => [c, { type: \"array\", items: clusterItem }]))\n  }\n};\n\n// --- Bild in den RAM laden und als data-URL einbetten ---\nconst imageUrl = item[IMAGE_FIELD];\nif (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {\n  throw new Error(`Ungültige oder fehlende Bild-URL in '${IMAGE_FIELD}'`);\n}\nconst imageResponse = await this.helpers.httpRequest({ method: 'GET', url: imageUrl, encoding: 'arraybuffer' });\nconst base64Image = Buffer.from(imageResponse).toString('base64');\nconst lower = imageUrl.toLowerCase();\nconst mimeType = lower.endsWith('.png')  ? 'image/png'\n               : lower.endsWith('.webp') ? 'image/webp'\n               : 'image/jpeg';\n\nreturn {\n  json: {\n    model: MODEL,\n    messages: [\n      { role: \"system\", content: item.rawSystempromptText },\n      {\n        role: \"user\",\n        content: [\n          { type: \"text\",      text: item.rawPromptText },\n          { type: \"image_url\", image_url: { url: `data:${mimeType};base64,${base64Image}` } }\n        ]\n      }\n    ],\n    temperature: 0.1,\n    top_p: 0.8,\n    top_k: 20,\n    max_tokens: 10000,\n    chat_template_kwargs: { enable_thinking: false },\n    response_format: {\n      type: \"json_schema\",\n      json_schema: { name: \"llm3_audit_verdict\", strict: true, schema: SCHEMA }\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        944
+      ],
+      "id": "6357317c-03a5-438d-8b12-265532f5c6fc",
+      "name": "Audit_LLM3_Prep"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_LLM_ENDPOINT/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        944
+      ],
+      "id": "b197ae46-37d4-48ee-9d46-9873181076d2",
+      "name": "Call_LLM3_Audit"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        736,
+        1680
+      ],
+      "id": "41d3e1c6-3edb-4e7b-8803-9bb9b069e858",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "amount": 0.5
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        432,
+        1680
+      ],
+      "id": "560020d1-3a50-491e-9041-89fe3698b41d",
+      "name": "Wait",
+      "webhookId": "809e1961-8bb0-4883-b120-827f2fd89ce0"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// CAPTION-PIPELINE V2.1: Qwen3.6-35B-Q4 + Gemma-4-26B-QAT PARALLEL\n// + Anti-Bias-Direktiven in PROMPT_SYSTEM\n// =====================================================================\n\nconst item = $input.item.json;\nconst imageUrl = item.Bildlink;\n\nif (!imageUrl || !imageUrl.startsWith('http')) {\n  throw new Error('Ungültige oder fehlende Bild-URL in Bildlink');\n}\n\nconst CAPTION_FALLBACK = `### 1. OBJEKTTYP\nNicht verfügbar – Caption-Modell ausgefallen.\n\n### 2. OPTISCHE ERSCHEINUNG\nNicht verfügbar.\n\n### 3. DARGESTELLT / SICHTBAR\nNicht verfügbar.\n\n### 4. SZENERIE / ANORDNUNG\nNicht verfügbar.\n\n### 5. SCHRIFT, ZEICHEN, NUMMERN\nNicht verfügbar.\n\n### 6. AUFFÄLLIGE VISUELLE MERKMALE\nNicht verfügbar.\n\n### 7. SENSITIVITÄTS-HINWEIS\nNicht verfügbar.`;\n\nconst PROMPT_SYSTEM = `Du bist ein neutraler Bildbeobachter. Dein Output dient als visueller Ankertext für ein nachgelagertes Erschließungssystem, das selbst keine Augen hat. Du bist diese Augen.\n\nOBERSTE DIREKTIVEN:\n- Beschreibe NUR pixelgenau Sichtbares.\n- Nenne ALLES visuell Auffällige, auch banale Hintergrundelemente, Begleitobjekte, Schäden oder Auffälligkeiten – auch wenn sie unwichtig wirken.\n- Bei Unschärfe oder Mehrdeutigkeit: schreibe \"nicht eindeutig erkennbar\". Erfinde keine Details.\n- Werte nichts. Beschreibe nur, was sichtbar ist – die Wertung ist nicht deine Aufgabe.\n- Rate keine Epochen, Stile, Kulturen, Funktionen oder Bedeutungen, die nicht eindeutig sichtbar sind.\n- Fotografische Hilfsmittel (Farbkeile, Maßstäbe, Aufsteller, Inventaretiketten, neutrale Aufnahmehintergründe) explizit als solche benennen, nicht als Teil des Objekts beschreiben.\n\nANTI-BIAS-DIREKTIVEN (GLEICHRANGIG MIT OBERSTEN DIREKTIVEN):\n- Verwende KEINE kulturell wertenden oder exotisierenden Begriffe wie „exotisch\", „primitiv\", „tribal\", „rituell\", „orientalisch\", „folkloristisch\", „fremd\", „mystisch\" oder „ethnisch\". Beschreibe stattdessen Form, Farbe, Material, Technik und Zustand.\n- Schließe NICHT von der optischen Erscheinung eines Objekts auf kulturelle Zugehörigkeit, Herkunftsregion, Ethnie oder Religion. Wenn eine Zuordnung nicht durch sichtbare Schrift, Symbole oder eindeutige ikonografische Marker zweifelsfrei belegbar ist, unterlasse sie.\n- Beschreibe dargestellte Personen durch sichtbare Merkmale (Kleidung, Haltung, Tätigkeit, Haartracht, Kopfbedeckung), nicht durch vermutete Gruppenzugehörigkeit, Herkunft oder Hautfarbe – es sei denn, Hautfarbe ist für die Bildbeschreibung unverzichtbar (z.B. bei Porträtfotografie). In diesem Fall: neutrale Benennung ohne wertende Konnotation.\n- Verwende KEINE defizitorientierten Begriffe für sichtbare körperliche Merkmale. Nicht „verkrüppelt\", „missgebildet\", „entstellt\", sondern neutrale Beschreibung der sichtbaren Anatomie.\n- Übertrage keine modernen oder westlichen Kategorien auf historische Darstellungen. Ein Objekt, das du nicht einordnen kannst, ist „nicht eindeutig klassifizierbar\", nicht „primitiv\" oder „kunsthandwerklich\".\n\nOBJEKTKLASSIFIKATION:\nErkenne zuerst, ob das Aufgenommene ein dreidimensionales Objekt (Skulptur, Gefäß, Werkzeug, Möbel, Münze, Präparat, Mineral, Alltagsgegenstand) oder ein zweidimensionales Bildträgerobjekt (Fotografie, Gemälde, Druck, Zeichnung, Aquarell, Plakat, Postkarte, Urkunde, Buchseite) ist. Bei Bildträgerobjekten unterscheide konsequent zwischen dem Trägerobjekt und dem darauf Abgebildeten.\n\nOUTPUT-STRUKTUR:\n\n### 1. OBJEKTTYP\nKnappe physische Klassifikation des Trägerobjekts in einem Satz.\n\n### 2. OPTISCHE ERSCHEINUNG\nBei 3D-Objekten: Form, Farbigkeit, Oberfläche, Glanzgrad, Textur des Objekts selbst.\nBei 2D-Bildträgern: Bildtechnik (z.B. Sepia, Schwarzweiß, Farbdruck, Aquarell), Bildoberfläche, Glanz, Korn. NICHT was im Bild zu sehen ist.\n\n### 3. DARGESTELLT / SICHTBAR\nBei 3D-Objekten: Substantivische Liste aller plastisch oder aufgemalten Elemente am Objekt.\nBei 2D-Bildträgern: Substantivische Liste alles im Bild Sichtbaren – Personen, Tiere, Objekte, Bauwerke, Vegetation, Hintergrunddetails.\n\n### 4. SZENERIE / ANORDNUNG\nRäumliche oder kompositorische Einordnung in einem Satz.\n\n### 5. SCHRIFT, ZEICHEN, NUMMERN\nWörtliche Transkription aller erkennbaren Beschriftungen. Format: Position/Träger - \"Wortlaut\". Wenn nichts erkennbar: \"keine sichtbar\".\n\n### 6. AUFFÄLLIGE VISUELLE MERKMALE\nErhaltungszustand, Patina, Verfärbungen, Risse, Bruchstellen, Vergilbung, Restaurierungsspuren. Wenn nichts auffällig: \"keine sichtbaren Schäden oder Auffälligkeiten\".\n\n### 7. SENSITIVITÄTS-HINWEIS\nPrüfe und melde ausschließlich auf Basis des Sichtbaren:\n- Menschliche Überreste oder Knochen sichtbar?\n- Darstellung von Personen in erkennbar entwürdigender, stereotypisierender oder karikierender Pose/Aufmachung?\n- Symbole oder Insignien, die auf NS-Kontext, rassistische Propaganda oder religiöse Herabwürdigung hindeuten?\n- Nacktheit oder Halbnacktheit dargestellter Personen in einem Kontext, der auf ethnografische Zurschaustellung hindeutet?\nWenn nichts davon sichtbar: \"Keine.\"\nWenn etwas sichtbar: knapp und faktisch benennen, was zu sehen ist – nicht interpretieren, nur beschreiben.\n\nAntworte ausschließlich in dieser Struktur. Knapp, faktisch, deutsch.`;\n\nconst PROMPT_USER = \"Erstelle den visuellen Befund für dieses Objekt basierend auf dem Bild.\";\n\n// ---------------------------------------------------------------------\n// BILD-DOWNLOAD & BASE64 (1x für alle)\n// ---------------------------------------------------------------------\nconst imageResponse = await this.helpers.httpRequest({\n  method: 'GET',\n  url: imageUrl,\n  encoding: 'arraybuffer'\n});\nconst base64ImageString = Buffer.from(imageResponse).toString('base64');\nconst mimeType = imageUrl.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';\nconst base64Payload = `data:${mimeType};base64,${base64ImageString}`;\n\nconst GPU_URL = 'YOUR_LLM_ENDPOINT/v1/chat/completions';\nconst headers = { \"Authorization\": \"Bearer YOUR_API_KEY\", \"Content-Type\": \"application/json\" };\n\n// ---------------------------------------------------------------------\n// PAYLOADS\n// ---------------------------------------------------------------------\nconst bodyQwen = {\n  model: \"qwen3.6-35b-a3b-mtp-q4\",\n  reasoning_budget: 512,\n  messages: [\n    { role: \"system\", content: PROMPT_SYSTEM },\n    { role: \"user\", content: [\n      { type: \"text\", text: PROMPT_USER },\n      { type: \"image_url\", image_url: { url: base64Payload } }\n    ]}\n  ],\n  temperature: 0.1, top_p: 0.9, max_tokens: 2500\n};\n\nconst bodyGemma = {\n  model: \"gemma-4-26b-a4b-qat\",\n  messages: [\n    { role: \"user\", content: [\n      { type: \"text\", text: PROMPT_SYSTEM + \"\\n\\n\" + PROMPT_USER },\n      { type: \"image_url\", image_url: { url: base64Payload } }\n    ]}\n  ],\n  temperature: 0.1, top_p: 0.9, max_tokens: 2500\n};\n\n// ---------------------------------------------------------------------\n// PARALLEL: Qwen + Gemma gleichzeitig – mit individuellem Fallback\n// ---------------------------------------------------------------------\nconst [resQwen, resGemma] = await Promise.allSettled([\n  this.helpers.httpRequest({ method: 'POST', url: GPU_URL, headers, body: bodyQwen,  json: true, timeout: 600000 }),\n  this.helpers.httpRequest({ method: 'POST', url: GPU_URL, headers, body: bodyGemma, json: true, timeout: 600000 })\n]);\n\nconst captionQwen  = resQwen.status  === 'fulfilled'\n  ? (resQwen.value.choices?.[0]?.message?.content  || CAPTION_FALLBACK)\n  : CAPTION_FALLBACK;\n\nconst captionGemma = resGemma.status === 'fulfilled'\n  ? (resGemma.value.choices?.[0]?.message?.content || CAPTION_FALLBACK)\n  : CAPTION_FALLBACK;\n\nconst tokensQwen  = resQwen.status  === 'fulfilled' ? (resQwen.value.usage?.total_tokens  || 0) : 0;\nconst tokensGemma = resGemma.status === 'fulfilled' ? (resGemma.value.usage?.total_tokens || 0) : 0;\n\nreturn {\n  json: {\n    _id:          item._id || '',\n    Bildlink:     imageUrl,\n    res_qwen:     captionQwen,\n    res_gemma:    captionGemma,\n    tokens_total: tokensQwen + tokensGemma\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32,
+        560
+      ],
+      "id": "30d9ec89-24b9-4f57-a6e6-ada9b61d288e",
+      "name": "Caption_Parallel_Qwen_Gemma"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "gepe9fZaBGmUpB4B",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/gepe9fZaBGmUpB4B",
+          "cachedResultName": "local_03_V1.2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        432,
+        1296
+      ],
+      "id": "08974a41-f228-4785-9004-f5aeaddd2e40",
+      "name": "Call 'local_03_V1.2'"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// CODE-NODE: Stufe 1b - Synthese/Schiedsrichter (Gemma-4-12B-QAT)\n// V2.1: + Anti-Bias-Prüfschicht in Synthese-Regeln\n// =====================================================================\n\nconst item = $input.item.json;\nconst imageUrl = item.Bildlink;\n\nif (!imageUrl || !imageUrl.startsWith('http')) {\n  throw new Error('Ungültige oder fehlende Bild-URL');\n}\nif (!item.res_qwen || !item.res_gemma) {\n  throw new Error('Captions fehlen (res_qwen oder res_gemma)');\n}\n\nconst PROMPT_SYNTHESE = `Du bist ein präziser Bildschiedsrichter. Du erhältst das Originalbild sowie zwei unabhängige visuelle Befunde desselben Objekts von zwei verschiedenen Modellen.\n\nDEINE AUFGABE:\n1. Vergleiche beide Befunde gegeneinander und gegen das Bild.\n2. Prüfe beide Befunde auf sprachliche Verzerrungen (siehe BIAS-FILTER).\n3. Erstelle einen einzigen, konsolidierten visuellen Befund.\n\nREGELN:\n- Was beide Befunde übereinstimmend nennen UND im Bild sichtbar ist → übernehmen.\n- Was nur ein Befund nennt, aber im Bild klar sichtbar ist → übernehmen.\n- Was nur ein Befund nennt und im Bild NICHT verifizierbar ist → verwerfen, nicht übernehmen.\n- Was beide Befunde nennen, aber im Bild nicht erkennbar ist → als [unsicher] markieren.\n- Widersprüche zwischen den Befunden → das Bild entscheidet. Begründe kurz in Abschnitt 8.\n- Halluzinationen (Inhalte die im Bild nicht vorhanden sind) → explizit in Abschnitt 8 als verworfen benennen.\n- Erfinde nichts Neues. Dein Output basiert ausschließlich auf dem was die Befunde nennen und das Bild zeigt.\n\nBIAS-FILTER (bei der Übernahme aus den Quellbefunden prüfen):\nVision-Modelle tendieren zu stereotypisierender Sprache bei nicht-westlichen oder kolonial markierten Objekten (\"Visual Orientalism\"). Prüfe bei der Konsolidierung:\n- Verwenden die Quellbefunde exotisierende oder wertende Begriffe wie „exotisch\", „primitiv\", „tribal\", „rituell\", „orientalisch\", „folkloristisch\", „mystisch\", „ethnisch\"? → Diese Begriffe NICHT in den konsolidierten Befund übernehmen. Ersetze durch neutrale Beschreibung von Form, Farbe, Technik. Vermerke die Bereinigung in Abschnitt 8.\n- Schreiben die Quellbefunde dargestellten Personen eine kulturelle/ethnische Zugehörigkeit zu, die im Bild nicht durch Schrift, Symbole oder eindeutige ikonografische Marker belegbar ist? → Zuschreibung NICHT übernehmen. Nur sichtbare Merkmale beschreiben.\n- Verwenden die Quellbefunde defizitorientierte Sprache für körperliche Merkmale („verkrüppelt\", „missgebildet\", „entstellt\")? → Ersetze durch neutrale anatomische Beschreibung.\n- Ordnen die Quellbefunde das Objekt einer Kultur, Epoche oder Region zu, ohne dass dies visuell zweifelsfrei belegbar ist? → Zuordnung NICHT übernehmen. Das Objekt ist „nicht eindeutig zuordenbar\", nicht „afrikanisch wirkend\" oder „asiatisch anmutend\".\n\nOUTPUT-STRUKTUR (identisch zu den Eingabe-Befunden, plus zwei Pflicht-Abschnitte):\n\n### 1. OBJEKTTYP\nKnappe physische Klassifikation des Trägerobjekts in einem Satz.\n\n### 2. OPTISCHE ERSCHEINUNG\nBei 3D-Objekten: Form, Farbigkeit, Oberfläche, Glanzgrad, Textur.\nBei 2D-Bildträgern: Bildtechnik, Bildoberfläche, Glanz, Korn. NICHT was im Bild zu sehen ist.\n\n### 3. DARGESTELLT / SICHTBAR\nSubstantivische Liste aller im Bild sichtbaren Elemente.\n\n### 4. SZENERIE / ANORDNUNG\nRäumliche oder kompositorische Einordnung in einem Satz.\n\n### 5. SCHRIFT, ZEICHEN, NUMMERN\nWörtliche Transkription aller erkennbaren Beschriftungen. Wenn nichts: \"keine sichtbar\".\n\n### 6. AUFFÄLLIGE VISUELLE MERKMALE\nErhaltungszustand, Patina, Verfärbungen, Risse, Vergilbung. Wenn nichts: \"keine sichtbaren Schäden oder Auffälligkeiten\".\n\n### 7. SENSITIVITÄTS-HINWEIS\nPrüfe und melde ausschließlich auf Basis des Sichtbaren:\n- Menschliche Überreste oder Knochen sichtbar?\n- Darstellung von Personen in erkennbar entwürdigender, stereotypisierender oder karikierender Pose/Aufmachung (z.B. rassistische Karikatur, koloniale Zurschaustellung, entwürdigende Nacktheit)?\n- Symbole oder Insignien, die auf NS-Kontext, rassistische Propaganda oder religiöse Herabwürdigung hindeuten?\n- Darstellungen, die auf Human Remains, Sakrales oder Abbildungen Verstorbener in sensiblen/indigenen Kontexten hinweisen?\nWenn nichts davon sichtbar: \"Keine.\"\nWenn etwas sichtbar: knapp und faktisch benennen, was zu sehen ist – nicht interpretieren, nur beschreiben. Dieser Hinweis steuert den Sovereignty-Check des nachgelagerten Erschließungssystems.\n\n### 8. KONFIDENZ / UNSICHERHEIT\nListe was verworfen wurde (Halluzinationen) und was als [unsicher] markiert ist.\nListe außerdem jede Bias-Bereinigung: welcher Begriff aus welchem Quellbefund durch welche neutrale Formulierung ersetzt wurde.\nWenn nichts: \"Keine Auffälligkeiten.\"\n\nAntworte ausschließlich in dieser Struktur. Knapp, faktisch, deutsch.`;\n\n// ---------------------------------------------------------------------\n// BILD-DOWNLOAD & BASE64\n// ---------------------------------------------------------------------\nconst imageResponse = await this.helpers.httpRequest({\n  method: 'GET',\n  url: imageUrl,\n  encoding: 'arraybuffer'\n});\nconst base64ImageString = Buffer.from(imageResponse).toString('base64');\nconst mimeType = imageUrl.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';\nconst base64Payload = `data:${mimeType};base64,${base64ImageString}`;\n\nconst GPU_URL = 'YOUR_LLM_ENDPOINT/v1/chat/completions';\nconst headers = { \"Authorization\": \"Bearer YOUR_API_KEY\", \"Content-Type\": \"application/json\" };\n\nconst userPrompt = `Hier sind die zwei unabhängigen visuellen Befunde:\n\n[BEFUND A – Qwen]\n\"\"\"\n${item.res_qwen}\n\"\"\"\n\n[BEFUND B – Gemma]\n\"\"\"\n${item.res_gemma}\n\"\"\"\n\nErstelle den konsolidierten visuellen Befund basierend auf beiden Quellen und dem Originalbild. Prüfe dabei den BIAS-FILTER.`;\n\nconst bodySynthese = {\n  model: \"gemma-4-12b-qat\",\n  messages: [\n    { role: \"user\", content: [\n      { type: \"text\", text: PROMPT_SYNTHESE + \"\\n\\n\" + userPrompt },\n      { type: \"image_url\", image_url: { url: base64Payload } }\n    ]}\n  ],\n  temperature: 0.1,\n  top_p: 0.9,\n  max_tokens: 3000,\n  chat_template_kwargs: { enable_thinking: false }\n};\n\n// ---------------------------------------------------------------------\n// SYNTHESE-CALL mit Fallback\n// ---------------------------------------------------------------------\nlet masterCaption;\nlet tokensSynthese = 0;\n\ntry {\n  const resSynthese = await this.helpers.httpRequest({\n    method: 'POST',\n    url: GPU_URL,\n    headers,\n    body: bodySynthese,\n    json: true,\n    timeout: 300000\n  });\n\n  masterCaption = resSynthese.choices?.[0]?.message?.content || null;\n  tokensSynthese = resSynthese.usage?.total_tokens || 0;\n\n  // Fallback: wenn content leer ist (Thinking-Problem)\n  if (!masterCaption) {\n    masterCaption = resSynthese.choices?.[0]?.message?.reasoning_content || item.res_qwen;\n  }\n\n} catch (error) {\n  // Fallback auf Qwen-Caption wenn Synthese ausfällt\n  masterCaption = item.res_qwen;\n}\n\nreturn {\n  json: {\n    _id:              item._id || '',\n    Bildlink:         imageUrl,\n    res_qwen:         item.res_qwen,\n    res_gemma:        item.res_gemma,\n    master_caption:   masterCaption,\n    tokens_total:     item.tokens_total + tokensSynthese\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        560
+      ],
+      "id": "6f7841ac-98ee-4ccd-b3dd-86813b1a6fc2",
+      "name": "Synthese_LLM1b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// REPAIR-PREP: gelbe Terme + Kontext einsammeln, Repair-LLM-Body bauen\nconst item = $input.item.json;\nconst CLUSTERS = [\"Objekttyp\",\"Thema_Phänomen\",\"Inhalt_Motiv\",\"Funktion_Zweck\",\n  \"Visuelle_Merkmale\",\"Form_Gestalt\",\"Bestandteile\",\"Gebrauchskontext\",\n  \"Kultureller_Kontext\",\"Emotion_Atmosphäre\",\"Farbe_Nuancen\"];\n\nlet masterCaption = \"\", metaString = \"\";\ntry { masterCaption = $('02_keywords').item.json.master_caption || \"\"; } catch(e){}\ntry { metaString    = $('02_keywords').item.json.context_data_string || \"\"; } catch(e){}\n\nconst pv = item.payload_valid || {};\nconst pr = item.payload_rejected || {};\nconst yellows = [];\nfor (const c of CLUSTERS) {\n  for (const src of [pv[c], pr[c]]) {\n    if (Array.isArray(src)) for (const t of src) {\n      if (t && t.status === 'yellow') yellows.push({\n        original: t.term, cluster: c, why: t.why || \"\",\n        judge_comment: t.judge_comment || \"\", fehlerklassen: t.fehlerklassen || []\n      });\n    }\n  }\n}\n\nconst SCHEMA = {\n  type:\"object\", additionalProperties:false, required:[\"repairs\"],\n  properties:{ repairs:{ type:\"array\", items:{\n    type:\"object\", additionalProperties:false,\n    required:[\"original\",\"cluster\",\"repairable\",\"repaired_terms\"],\n    properties:{\n      original:{type:\"string\"}, cluster:{type:\"string\"},\n      repairable:{type:\"boolean\"}, repaired_terms:{type:\"array\", items:{type:\"string\"}}\n    }}}}\n};\n\nconst SYSTEM = `Du bist ein knapper Reparatur-Kustos für GND-orientierte Museums-Schlagworte (Stadtmuseum Berlin).\nDu erhältst gelbe (formal behebbare) Schlagworte mit dem Reparaturhinweis eines Prüfers (judge_comment) plus Objektkontext.\nDer judge_comment ist ein VORSCHLAG, den du übernehmen ODER überstimmen darfst, wenn er nicht trägt.\n\nREGELN PRO TERM:\n- Ziel: ein einzelner GND-tauglicher Sachbegriff im Singular (Nomen).\n- Plural -> Singular (Bücher -> Buch).\n- Adjektiv -> Substantiv NUR wenn ein echtes Sachnomen entsteht (gepflastert -> Pflaster).\n- Unzerlegtes Kompositum -> sinnvolle Teile (Soldatenalltag -> [\"Soldat\",\"Alltag\"]). Feststehende Fachbegriffe (Dampfschiff) bleiben.\n- Material-Kompositum: das Sachnomen ist der Tail (Holzgriff -> Griff, Metallsteg -> Steg). Reines Material (Holz, Papier, Karton) ist NICHT reparierbar.\n- Fehlende Laien-Brücke: Fachbegriff behalten UND Alltags-Oberbegriff ergänzen (Tschako -> [\"Tschako\",\"Hut\"]).\n- Du darfst pro Term mehrere Terme ausgeben (Brücke, Kompositum-Teile).\n- ABLEHNEN (repairable:false, repaired_terms:[]) wenn nur eine Mehrwort-Phrase möglich wäre (\"spitz zulaufende Form\") oder kein sauberer Sachbegriff entsteht. Lieber ablehnen als ein schlechtes Schlagwort erzeugen.\n- Erfinde keine inhaltliche Neuaussage. Repariere nur Form/Begriff, nicht die Evidenz.\n\nAntworte ausschließlich im vorgegebenen JSON-Schema.`;\n\nconst USER = `Objektkontext und zu reparierende gelbe Terme:\n\"\"\"\n${JSON.stringify({ master_caption: masterCaption, metadaten: metaString, zu_reparieren: yellows }, null, 2)}\n\"\"\"\nGib für JEDEN Term einen Eintrag in \"repairs\" zurück (gleiche Reihenfolge, gleicher cluster, gleiches original).`;\n\nreturn { json: {\n  model: \"gemma-4-12b-qat\",            // Alternative: phi4-Modellstring\n  messages: [\n    { role:\"system\", content: SYSTEM },\n    { role:\"user\",   content: USER }\n  ],\n  temperature: 0.1, top_p: 0.9, max_tokens: 2000,\n  chat_template_kwargs: { enable_thinking: false },\n  response_format: { type:\"json_schema\", json_schema:{ name:\"repair_result\", strict:true, schema: SCHEMA } }\n}};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        1296
+      ],
+      "id": "a0f66779-686d-42e1-b448-83a9fbc1e9d5",
+      "name": "Repair-Prep"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_LLM_ENDPOINT/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 2000000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -144,
+        1296
+      ],
+      "id": "19d809d9-d2a1-4c23-9ecc-93c4bdbdc06b",
+      "name": "Call_Repair_LLM"
+    },
+    {
+      "parameters": {
+        "jsCode": "// REPAIR-POST v3: reparierte Gelbe -> Grün; Move hat der Mapper schon erledigt.\n// Globale Dedupe + Datums-Netz wie applyGreenNets. Abgelehnte bleiben Gelb.\nconst CLUSTERS = [\"Objekttyp\",\"Thema_Phänomen\",\"Inhalt_Motiv\",\"Funktion_Zweck\",\n  \"Visuelle_Merkmale\",\"Form_Gestalt\",\"Bestandteile\",\"Gebrauchskontext\",\n  \"Kultureller_Kontext\",\"Emotion_Atmosphäre\",\"Farbe_Nuancen\"];\nconst META = [\"_decolonial_audit_log\",\"Protokoll_Status\",\"_provenance_critique\",\"Kritischer_Hinweis\"];\nconst clone = o => JSON.parse(JSON.stringify(o||{}));\nconst norm  = s => (s||\"\").toString().trim().toLowerCase();\nconst DATE_RE = /\\b\\d{4}\\b|jahrhundert|\\bjh\\.?\\b|\\b\\d{2,4}er\\b/i;\n\nconst base = $('Parse_LLM3_and_Debias').item.json;\nconst pvIn = clone(base.payload_valid);\nconst prIn = clone(base.payload_rejected);\n\nconst DROP = new Set([\"farbig\",\"rasse\",\"exotisch\",\"abnormitätenschau\"]);\nconst REPLACE = {\n  \"neger\":\"Schwarzer Mensch\",\"mohr\":\"Schwarzer Mensch\",\"eskimo\":\"Inuit\",\n  \"indianer\":\"Indigene Bevölkerung\",\"zigeuner\":\"Roma und Sinti\",\"gypsy\":\"Roma\",\n  \"eingeboren\":\"Indigen\",\"behinderter\":\"Mensch mit Behinderung\",\"krüppel\":\"Mensch mit Behinderung\",\n  \"zwerg\":\"Kleinwüchsiger Mensch\",\"taubstumm\":\"Gehörlos\",\"dunkelhäutig\":\"Schwarze Menschen\",\n  \"gastarbeiter\":\"Arbeitsmigranten\",\"muselmann\":\"Muslim\",\"naturvolk\":\"Indigene Gemeinschaft\",\n  \"mongoloid\":\"Person mit Trisomie 21\",\"bastard\":\"Außereheliches Kind\",\"transsexuell\":\"Transgeschlechtlich\",\n  \"berber\":\"Imazighen\",\"australneger\":\"Aborigine\",\"drittes reich\":\"NS-Regime\",\n  \"kristallnacht\":\"Novemberpogrome\",\"irrenanstalt\":\"Psychiatrische Klinik\"\n};\nfunction biasScreen(raw){\n  const t=(raw||\"\").toString().trim(); if(!t) return null;\n  const n=norm(t);\n  if (DROP.has(n)) return {term:t, drop:true};\n  if (REPLACE[n])  return {term:REPLACE[n], drop:false};\n  return {term:t, drop:false};\n}\n\nfunction parseLLM(){\n  const j=$input.item.json; let content=\"\";\n  if (j.choices && j.choices[0] && j.choices[0].message) content=j.choices[0].message.content;\n  else if (j.body && j.body.choices) content=j.body.choices[0].message.content;\n  else content=JSON.stringify(j);\n  let c=(content||\"\").replace(/^```json\\s*/i,'').replace(/\\s*```$/,'');\n  const a=c.indexOf('{'), b=c.lastIndexOf('}');\n  if (a!==-1 && b!==-1) c=c.substring(a,b+1);\n  try { return JSON.parse(c); } catch(e){ return null; }\n}\nconst parsed  = parseLLM();\nconst repairs = (parsed && Array.isArray(parsed.repairs)) ? parsed.repairs : [];\nconst repMap  = {};\nfor (const r of repairs) repMap[ r.cluster + '||' + norm(r.original) ] = r;\n\nconst validAccum={}, rejectedAccum={};\nfor (const c of CLUSTERS){ validAccum[c]=[]; rejectedAccum[c]=[]; }\nconst seen = new Set();   // GLOBAL, wie applyGreenNets\n\n// Pass 1: bestehende Grüne + Rote\nfor (const c of CLUSTERS){\n  for (const g of (Array.isArray(pvIn[c])?pvIn[c]:[]))\n    if (g && g.status!=='yellow'){ validAccum[c].push(g); seen.add(norm(g.term)); }\n  for (const rd of (Array.isArray(prIn[c])?prIn[c]:[]))\n    if (rd && rd.status!=='yellow') rejectedAccum[c].push(rd);\n}\n\n// Gelbe einsammeln (Move ist schon passiert -> source = aktueller Cluster)\nconst yellowItems=[];\nfor (const c of CLUSTERS)\n  for (const src of [pvIn[c], prIn[c]])\n    if (Array.isArray(src)) for (const t of src)\n      if (t && t.status==='yellow') yellowItems.push({ y:t, source:c });\n\n// Pass 2: reparieren\nfor (const {y, source} of yellowItems){\n  const r = repMap[ source + '||' + norm(y.term) ];\n  let folded=false;\n  if (r && r.repairable && Array.isArray(r.repaired_terms) && r.repaired_terms.length){\n    const target = (y.correct_cluster && CLUSTERS.includes(y.correct_cluster)) ? y.correct_cluster : source;\n    for (const rt of r.repaired_terms){\n      const s=biasScreen(rt);\n      if (!s || s.drop) continue;\n      if (!s.term || DATE_RE.test(s.term) || seen.has(norm(s.term))) continue;\n      seen.add(norm(s.term));\n      validAccum[target].push({ term:s.term, why:y.why||\"\", status:\"green\", judge_comment:\"\", _repaired_from:y.term });\n      folded=true;\n    }\n  }\n  if (!folded) rejectedAccum[source].push(y);   // bleibt gelb\n}\n\nconst newValid={}, newRejected={};\nfor (const k of META){ if (pvIn[k]!==undefined) newValid[k]=pvIn[k]; if (prIn[k]!==undefined) newRejected[k]=prIn[k]; }\nfor (const c of CLUSTERS){ newValid[c]=validAccum[c]; newRejected[c]=rejectedAccum[c]; }\nreturn { json: { ...base, payload_valid:newValid, payload_rejected:newRejected } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        1296
+      ],
+      "id": "59049934-e4af-4dcc-9542-676d0c93eaff",
+      "name": "Repair-Post"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Set_Image_Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02_keywords": {
+      "main": [
+        [
+          {
+            "node": "Tagging_LLM2_Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract_LLM2_Response": {
+      "main": [
+        [
+          {
+            "node": "03_evaluation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03_evaluation": {
+      "main": [
+        [
+          {
+            "node": "Audit_LLM3_Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract_LLM3_Response": {
+      "main": [
+        [
+          {
+            "node": "Parse_LLM3_and_Debias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse_LLM3_and_Debias": {
+      "main": [
+        [
+          {
+            "node": "Repair-Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build_GND_Payload": {
+      "main": [
+        [
+          {
+            "node": "Call 'local_03_V1.2'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Merge_GND_and_Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge_GND_and_Rejected": {
+      "main": [
+        [
+          {
+            "node": "Flatten_for_SeaTable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten_for_SeaTable": {
+      "main": [
+        [
+          {
+            "node": "Map_to_SeaTable_Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map_to_SeaTable_Schema": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row": {
+      "main": [
+        []
+      ]
+    },
+    "Add a row link": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set_Image_Fields": {
+      "main": [
+        [
+          {
+            "node": "Caption_Parallel_Qwen_Gemma",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tagging_LLM2_Prep": {
+      "main": [
+        [
+          {
+            "node": "Call_LLM2_Tagging",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call_LLM2_Tagging": {
+      "main": [
+        [
+          {
+            "node": "Extract_LLM2_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit_LLM3_Prep": {
+      "main": [
+        [
+          {
+            "node": "Call_LLM3_Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call_LLM3_Audit": {
+      "main": [
+        [
+          {
+            "node": "Extract_LLM3_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Add a row link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Caption_Parallel_Qwen_Gemma": {
+      "main": [
+        [
+          {
+            "node": "Synthese_LLM1b",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'local_03_V1.2'": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Synthese_LLM1b": {
+      "main": [
+        [
+          {
+            "node": "02_keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repair-Prep": {
+      "main": [
+        [
+          {
+            "node": "Call_Repair_LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call_Repair_LLM": {
+      "main": [
+        [
+          {
+            "node": "Repair-Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repair-Post": {
+      "main": [
+        [
+          {
+            "node": "Build_GND_Payload",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8b65428e-23eb-4d1e-86dc-a371e09c4437",
+  "meta": {
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "nodeGroups": [],
+  "id": "MIPgWaBe1tYXlazv",
+  "tags": [
+    {
+      "updatedAt": "2026-06-20T18:32:20.717Z",
+      "createdAt": "2026-06-20T18:32:20.717Z",
+      "id": "3zvvXNaJksRAPxjO",
+      "name": "latest"
+    }
+  ]
+}
