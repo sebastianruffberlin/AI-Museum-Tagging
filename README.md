@@ -2,7 +2,7 @@
 
 # 🏛️ AI Museum Tagger
 
-### Automatisierte, dekoloniale Verschlagwortung von Museumsobjekten
+### Automatisierte Verschlagwortung von Museumsobjekten
 ### via lokaler KI — open source, self-hosted, datensouverän
 
 [![License: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
@@ -215,42 +215,49 @@ Die System-Prompts in `prompts/` sind unabhängig vom restlichen Stack nutzbar. 
 
 1. Prompt-Dateien aus `prompts/` herunterladen
 2. System-Prompts in eigene LLM-Calls oder Agenten-Frameworks einbinden
-3. Die 11 Cluster-Definitionen und Audit-Logik sind vollständig dokumentiert
+3. Die 11 Cluster-Definitionen und Audit-Logik sind vollständig in den Prompt-Dateien dokumentiert
 
 ### Option 2 — n8n-Workflows mit eigenem Server
 
 Die Workflow-JSONs funktionieren mit jedem OpenAI-kompatiblen Endpunkt — egal ob Cloud-API oder eigener Server.
 
 1. SeaTable aufsetzen und Tabellen via CSV-Templates anlegen → `docs/setup_seatable.md`
-2. Die drei JSON-Dateien in n8n importieren
+2. Die drei JSON-Dateien aus `workflows/` in n8n importieren
 3. Platzhalter ersetzen: `YOUR_LLM_ENDPOINT`, `YOUR_API_KEY`, `YOUR_SEATABLE_CREDENTIAL_ID`
-4. GND-Sachbegriffe in OpenSearch indexieren (Dump der DNB)
+4. GND-Sachbegriffe in OpenSearch indexieren — Script: `deploy/import_gnd.py`
 
 ### Option 3 — Vollständigen Stack nachbauen
 
-Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann mit den Setup-Skripten im `deploy/` Ordner aufgebaut werden. Empfohlen für Museen die Datensouveränität und volle Kontrolle wollen.
+Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann mit den Setup-Skripten im `deploy/` Ordner automatisiert aufgebaut werden. Empfohlen für Museen die Datensouveränität und volle Kontrolle wollen.
 
-1. `deploy/README.md` lesen — Voraussetzungen und Schritt-für-Schritt Anleitung
-2. `deploy/.env.example` zu `deploy/.env` kopieren und ausfüllen
-3. `deploy/setup_hetzner.sh` auf dem Orchestrierungs-Server ausführen
-4. `deploy/setup_scaleway.sh` auf dem GPU-Server ausführen (inkl. Modell-Downloads ~118 GB)
-5. Workflows importieren und Platzhalter ersetzen
+1. `docs/stack_setup.md` lesen — vollständige technische Dokumentation beider Server
+2. `deploy/.env.example` zu `.env` kopieren und ausfüllen
+3. `deploy/setup_hetzner.sh` auf dem Orchestrierungs-Server ausführen (~15 Min + GND-Import)
+4. `deploy/setup_scaleway.sh` auf dem GPU-Server ausführen (~60-120 Min inkl. 118 GB Modell-Downloads)
+5. Workflows aus `workflows/` in n8n importieren und Platzhalter ersetzen
 
-Detaillierte Dokumentation aller Komponenten: `docs/stack_setup.md`
+### 📚 Dokumentation im Überblick
+
+| Datei | Inhalt |
+| :--- | :--- |
+| `docs/setup_seatable.md` | SeaTable Tabellen, Spalten, Import-Anleitung |
+| `docs/stack_setup.md` | Vollständige Server-Dokumentation: Hardware, Software-Versionen, Docker-Stacks, Modelle mit Download-Links |
+| `deploy/README.md` | Schnellstart für den automatisierten Stack-Aufbau |
+| `deploy/.env.example` | Alle Konfigurationsvariablen mit Erklärungen |
+| `prompts/*.md` | System-Prompts aller LLM-Stufen mit Konfigurations-Variablen |
 
 ### Anpassung
 
-* **Analyse-Fokus** — System-Prompt in `01a_caption_parallel.md` anpassen
-* **Klassifizierung** — 11 Cluster-Definitionen in `02_kustos_generator.md` modifizieren
-* **Audit-Regeln** — Fehlerklassen-Katalog in `04_senior_auditor.md` erweitern
-* **Bias-Filter** — `DE_BIAS_MAP` im Node `Parse_LLM3_and_Debias` (Tagging_Sub.json) ergänzen
-* **SeaTable-Spalten** — Spaltennamen sind in den n8n-Nodes konfigurierbar; Vorlage in `templates/`
+* **Analyse-Fokus** — System-Prompt in `prompts/01a_caption_parallel.md` anpassen
+* **Klassifizierung** — 11 Cluster-Definitionen in `prompts/02_kustos_generator.md` modifizieren
+* **Audit-Regeln** — Fehlerklassen-Katalog in `prompts/04_senior_auditor.md` erweitern
+* **Bias-Filter** — `DE_BIAS_MAP` im Node `Parse_LLM3_and_Debias` in `workflows/Tagging_Sub.json` ergänzen
+* **SeaTable-Spalten** — Spaltennamen in den n8n-Nodes konfigurierbar; Vorlage in `templates/`
 
 ---
 
 ## 🔭 Potenzial für Weiterentwicklung
 
-* **One-Click-Deployment** — Docker Compose Paket für Hetzner + Scaleway in Arbeit
 * **Batch-Modus** — Parallele Verarbeitung mehrerer Objekte (setzt mehr VRAM als L40S voraus)
 * **Monitoring** — Einbau von Langfuse (LLM-Tracing) und Grafana (Infrastruktur-Metriken)
 * **Feedback-Loop** — Rückspeisung manuell korrigierter Schlagworte zur Prompt-Optimierung
