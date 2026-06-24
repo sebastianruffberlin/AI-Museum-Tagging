@@ -2,14 +2,19 @@
 
 # 🏛️ AI Museum Tagger
 
-### Automatisierte Verschlagwortung von Museumsobjekten
+### Automatisierte, dekoloniale Verschlagwortung von Museumsobjekten
 ### via lokaler KI — open source, self-hosted, datensouverän
 
 [![License: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![n8n](https://img.shields.io/badge/n8n-2.27.4-orange)](https://n8n.io)
 [![SeaTable](https://img.shields.io/badge/SeaTable-6.1.8-blue)](https://seatable.io)
 [![llama.cpp](https://img.shields.io/badge/llama.cpp-lokal-green)](https://github.com/ggerganov/llama.cpp)
-[![Stack](https://img.shields.io/badge/GPU-NVIDIA%20L40S-76b900)](https://www.scaleway.com)
+[![llama-swap](https://img.shields.io/badge/llama--swap-build%20223-lightgrey)](https://github.com/mostlygeek/llama-swap)
+[![LiteLLM](https://img.shields.io/badge/LiteLLM-1.82.6-blueviolet)](https://github.com/BerriAI/litellm)
+[![OpenSearch](https://img.shields.io/badge/OpenSearch-latest-003B5C)](https://opensearch.org)
+[![Caddy](https://img.shields.io/badge/Caddy-2.9.2-00ADD8)](https://caddyserver.com)
+[![Docker](https://img.shields.io/badge/Docker-29.6.0-2496ED)](https://www.docker.com)
+[![GPU](https://img.shields.io/badge/GPU-NVIDIA%20L40S-76b900)](https://www.scaleway.com)
 
 </div>
 
