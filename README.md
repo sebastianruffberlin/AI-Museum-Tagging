@@ -1,7 +1,7 @@
 # AI Museum Tagger: Dokumentation
 
 > **Version: 2.0 | Stand: 24.Juni 2026**
-> Änderungen gegenüber v1.0: Caption-Pipeline auf parallele Dual-Model-Architektur mit Synthese-Schiedsrichter umgestellt, neuer Repair-Schritt für gelbe Begriffe, LLM3 wechselt von Triage zu Fehlerklassen-System, GND-Abgleich von AI-Agent auf Retrieve-then-Judge umgestellt, alle Modelle von Gemini auf lokale Modelle (Qwen/Gemma) migriert.
+> Änderungen gegenüber v1.0: Caption-Pipeline auf parallele Dual-Model-Architektur mit Synthese-Schiedsrichter umgestellt, neuer Repair-Schritt für gelbe Begriffe, LLM3 wechselt von Triage zu Fehlerklassen-System, GND-Abgleich von AI-Agent auf Retrieve-then-Judge umgestellt, alle Modelle von Gemini auf vollständig lokale Open-Source-Modelle (Qwen/Gemma) migriert.
 
 ---
 
@@ -11,53 +11,73 @@ Dieses Projekt stellt eine **Middleware** für Museen bereit. Sie dient der auto
 
 Der Prozess basiert auf einer **„Chain of Verification"**: Daten durchlaufen eine Sequenz spezialisierter LLM-Instanzen (Analyse, Generierung, Audit), um eine gegenseitige Validierung zu gewährleisten. Das System liefert eine Verschlagwortung, die sowohl **GND-konform** (Gemeinsame Normdatei) als auch nach dem **Folksonomie-Prinzip** (nutzerorientiert) aufgebaut ist.
 
----
-
-## 2. Technische Voraussetzungen und Versionen
-
-Das System wurde mit folgenden Komponenten getestet (Stand: Juni 2026):
-
-* **n8n:** Version **2.16.1** (Self-hosted via Docker).
-* **SeaTable:** **Enterprise Edition 6.0.10**.
-* **Elasticsearch:** Version **8.13** (Vektor- und Suchdatenbank für Normdaten).
-* **GND-Datenbestand:** Stand **10.04.2026**.
-* **KI-Modelle:** Lokale Modelle via eigenem LLM-Endpunkt (llama-swap):
-  * `qwen3.6-35b-a3b-mtp-q4` — Caption A
-  * `gemma-4-26b-a4b-qat` — Caption B
-  * `gemma-4-12b-qat` — Synthese / Repair
-  * `qwen3.6-27b-mtp` — Tagging (LLM2)
-  * `gemma-4-31b-it` — Audit (LLM3)
-  * `qwen3.6-35b-mtp` — GND-Abgleich (LLM4)
+Das System ist vollständig **self-hosted und Open Source** — keine kommerziellen API-Dienste, keine Daten-Weitergabe an Dritte.
 
 ---
 
-## 3. Infrastruktur und Deployment
+## 2. Technische Voraussetzungen
 
-Das System wird als Multi-Container-Setup (3 Instanzen via Docker Compose) auf einem VPS betrieben.
+### Infrastruktur (Zwei-Server-Setup)
 
-### Hardware-Spezifikationen (Empfehlung)
-* **VPS:** 8 vCPU (optimiert für parallele Reasoning-Tasks).
-* **RAM:** 16 GB.
-* **Speicher:** 80 GB NVMe.
+| Server | Aufgabe | Empfehlung |
+| :--- | :--- | :--- |
+| **Orchestrierung** | n8n, SeaTable, OpenSearch | Hetzner CPX52 oder vergleichbar (8+ vCPU, 16+ GB RAM) |
+| **KI-Inferenz** | llama.cpp, LiteLLM, llama-swap | GPU-Server mit 48 GB VRAM (z. B. Scaleway L40S) |
 
-### Systemauslastung (Betriebswerte)
-| Dienst | Funktion | RAM-Nutzung | CPU-Last |
-| :--- | :--- | :--- | :--- |
-| **n8n** | Orchestrierung & API-Management | ~523 MiB | 0.42% |
-| **SeaTable** | Datenverwaltung & Workflow-Steuerung | ~1.43 GiB | 3.51% |
-| **Elasticsearch** | Indizierung der GND-Daten | ~1.54 GiB | 0.71% |
-| **Gesamt** | **Host-System** | **~4.1 GiB** | **0.13 (Idle)** |
+Beide Server kommunizieren über HTTPS. Der Inferenz-Endpunkt ist per Firewall ausschließlich für den Orchestrierungs-Server erreichbar. Reverse Proxy (Caddy) übernimmt TLS-Terminierung auf beiden Servern.
+
+### Software-Stack
+
+**Orchestrierungs-Server:**
+* Ubuntu 24.04 LTS
+* Docker + Docker Compose
+* **n8n** `2.27.4` — Workflow-Orchestrierung
+* **SeaTable Enterprise** `6.1.8` + MariaDB `11.4.3` + Redis `7.2.7` — Datenverwaltung
+* **OpenSearch** `latest` — GND-Normdaten-Datenbank (2 GB Heap)
+* **SearXNG** `latest` — Metasuche (optional)
+* **Caddy** `2.9.2` — Reverse Proxy & TLS
+
+**KI-Inferenz-Server:**
+* Ubuntu 24.04 LTS + NVIDIA Treiber
+* Docker + nvidia-docker
+* **llama-swap** — On-Demand Model-Switcher (max. 1 großes Modell gleichzeitig im VRAM)
+* **LiteLLM** `main-latest` — OpenAI-kompatibler Proxy-Router
+* **llama.cpp** (llama-server) — GGUF-Inferenz-Backend
+* **Caddy** `latest` — Reverse Proxy & IP-Firewall
+* **Ollama** `latest` — optional, für kleine Hilfsmodelle
+
+### KI-Modelle (aktiv im Workflow)
+
+Alle Modelle laufen lokal als GGUF via llama.cpp. Kein Cloud-API-Zugriff erforderlich.
+
+| Modell | Quant | Größe | Aufgabe im Workflow | HuggingFace |
+| :--- | :--- | :--- | :--- | :--- |
+| **Qwen3.6-35B-A3B** | UD-Q6_K_XL | 29.6 GB | Caption A (parallel) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF) |
+| **Gemma-4-31B-it** | UD-Q4_K_XL | 18 GB | Caption B + Synthese (LLM1b) + Audit (LLM3) | [unsloth](https://huggingface.co/unsloth/gemma-4-31B-it-GGUF) |
+| **Qwen3.6-27B-MTP** | UD-Q6_K_XL | 24.2 GB | Tagging / Schlagwort-Generator (LLM2) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF) |
+| **Gemma-4-12B-QAT** | — | — | Repair-Kustos | lokal |
+| **Qwen3.6-35B-A3B-MTP** | UD-Q6_K_XL | 30.3 GB | GND-Abgleich (LLM4, Concurrency 8) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF) |
+
+Vollständige Modell-Dokumentation inkl. llama-swap Flags und Download-Links: `docs/stack_setup.md`
+
+---
+
+## 3. Kosten & Geschwindigkeit
+
+Das System läuft auf einem Scaleway L40S GPU-Server (On-Demand, Pay-per-Minute). Die Kosten beziehen sich auf die reine GPU-Serverzeit — keine API-Gebühren, keine Daten-Weitergabe.
+
+| Einheit | Zeit | Kosten |
+| :--- | :--- | :--- |
+| 1 Schlagwort | ~12 Sekunden | ~0,5 Ct |
+| 1 Objekt (30 Schlagworte) | ~6 Minuten | ~15 Ct |
+| 100 € Budget | ~68 Stunden | ~20.400 Schlagworte |
+| 1.000 Objekte | ~100 Stunden | ~147 € |
+
+*Basierend auf Scaleway L40S Serverpreisen und gemessener Inferenz-Geschwindigkeit des Stacks, Stand: Juni 2026.*
 
 ---
 
 ## 4. Pipeline-Architektur
-
-Der Stack besteht aus drei Ebenen:
-1. **SeaTable:** Datenquelle für Metadaten und Zielspeicher für Ergebnisse.
-2. **n8n:** Steuerung der Logik, Datenaufbereitung via JavaScript und LLM-Sequenzierung.
-3. **Elasticsearch:** Bereitstellung der Normdaten für den deterministischen GND-Abgleich.
-
-### Pipeline-Überblick (v2)
 
 ```
 SeaTable (metadata)
@@ -67,29 +87,29 @@ SeaTable (metadata)
         │
         ▼
 [Tagging_Sub]
-  ├── Phase 1a: Caption A (Qwen) ──┐
-  ├── Phase 1a: Caption B (Gemma) ─┤ parallel
-  │                                 ▼
-  ├── Phase 1b: Synthese LLM1b → master_caption
+  ├── Phase 1a: Caption A (Qwen3.6-35B) ──┐
+  ├── Phase 1a: Caption B (Gemma-4-31B)  ──┤ parallel
+  │                                         ▼
+  ├── Phase 1b: Synthese LLM1b (Gemma-4-31B) → master_caption
   │
-  ├── Phase 2:  Tagging LLM2 → 11 Cluster / Schlagworte + why
+  ├── Phase 2:  Tagging LLM2 (Qwen3.6-27B) → 11 Cluster
   │
-  ├── Phase 3:  Audit LLM3 → Fehlerklassen (kein Status!)
+  ├── Phase 3:  Audit LLM3 (Gemma-4-31B) → Fehlerklassen
   │                 │
   │           Code: Status aus Fehlerklassen berechnen
   │                 │
   │         ┌───────┴────────┐
   │       Grün             Gelb
   │         │                │
-  │         │         Phase 3b: Repair-Kustos
+  │         │     Phase 3b: Repair-Kustos (Gemma-4-12B)
   │         │                │
   │         │         ┌──────┴──────┐
   │         │      Repariert    Nicht reparierbar
   │         │       → Grün        → verworfen
   │         │
   ├── Phase 4:  GND-Abgleich [Tagging_GND]
-  │             OpenSearch _msearch → 5 Kandidaten pro Begriff
-  │             LLM4 Retrieve-then-Judge (Concurrency 8)
+  │             OpenSearch _msearch → 5 Kandidaten
+  │             LLM4 (Qwen3.6-35B-MTP, Concurrency 8)
   │
   └── Export → SeaTable (tags_gemini_2.5_pro) + Status-Update
 ```
@@ -115,7 +135,8 @@ SeaTable (metadata)
 │   ├── metadata_template.csv
 │   └── results_template.csv
 ├── docs/                   # Technische Dokumentation
-│   └── setup_seatable.md
+│   ├── setup_seatable.md          # SeaTable Tabellen & Import
+│   └── stack_setup.md             # Server-Setup: Hetzner + Scaleway
 └── README.md
 ```
 
@@ -123,57 +144,73 @@ SeaTable (metadata)
 
 ## 6. Komponentenbeschreibung
 
-### 6.1. SeaTable Datenstruktur
+### 5.1. SeaTable Datenstruktur
 
-Die Tabellen müssen zur korrekten Verarbeitung folgende Felder enthalten. Detaillierte Anleitungen zum Import und zur Konfiguration in `docs/setup_seatable.md`.
+Detaillierte Anleitungen zum Import und zur Konfiguration: `docs/setup_seatable.md`
 
 **Tabelle `metadata` (Eingabe):**
-* **Inv Nr**: Eindeutiger Primärschlüssel.
-* **processed**: Status-Indikator (Workflow verarbeitet Zeilen ungleich „ok").
-* **Bildlink**: URL zum Objektbild.
-* **Titel / Beschreibung**: Historische Kontextdaten.
-* **newest**: Wird automatisch vom Workflow gesetzt (z. B. `ok_1.3`).
+* **Inv Nr** — Eindeutiger Primärschlüssel
+* **processed** — Status-Indikator (Workflow verarbeitet Zeilen ungleich „ok")
+* **Bildlink** — URL zum Objektbild
+* **Titel / Beschreibung** — Historische Kontextdaten
+* **newest** — Wird automatisch vom Workflow gesetzt
 
 **Tabelle `tags_gemini_2.5_pro` (Ausgabe):**
-* **cluster**: Klassifizierung (z. B. Objekttyp, Thema, Emotion).
-* **schlagwort**: Validierter Begriff.
-* **status**: Audit-Bewertung (green / yellow / red).
-* **gnd_id / gnd_name**: Referenzierte Normdaten.
-* **confidence**: Konfidenz des GND-Abgleichs.
-* **llm2 / llm3 / llm4**: Protokollierung der Zwischenschritte (Data Lineage).
-* **hinweis**: Kritischer Hinweis des Senior-Auditors.
-* **audit1–audit5**: Decolonial Audit Log (5 Dimensionen).
-* **status2**: Protokoll-Status (Open Access / Restricted / Sensitive).
-* **config**: Automatisch befüllte Versions- und Modell-Konfiguration.
+* **cluster** — Klassifizierung (Objekttyp, Thema, Emotion, …)
+* **schlagwort** — Validierter Begriff
+* **status** — Audit-Bewertung (green / yellow / red)
+* **gnd_id / gnd_name / confidence** — Referenzierte Normdaten
+* **llm2 / llm3 / llm4** — Data Lineage der Zwischenschritte
+* **hinweis** — Kritischer Hinweis des Senior-Auditors
+* **audit1–audit5** — Decolonial Audit Log (5 Dimensionen)
+* **status2** — Protokoll-Status (Open Access / Restricted / Sensitive)
+* **config** — Automatisch befüllte Versions- und Modell-Konfiguration
 
-### 6.2. n8n Verarbeitungsschritte
+### 5.2. n8n Verarbeitungsschritte
 
-1. **Import & Splitting**: Abruf der Daten aus SeaTable, Vereinzelung auf einen Datensatz pro Lauf.
-2. **Caption A + B** (parallel): Zwei Vision-Modelle (Qwen + Gemma) erstellen unabhängige visuelle Befunde.
-3. **Synthese (LLM1b)**: Schiedsrichter-Modell konsolidiert beide Captions, verwirft Halluzinationen, bereinigt Bias → `master_caption`.
-4. **Schlagwort-Generierung (LLM2)**: Erstellt Keywords in 11 Clustern auf Basis von master_caption + Metadaten.
-5. **Fehlerklassen-Audit (LLM3)**: Ordnet jeden Begriff Fehlerklassen zu (kein Status — deterministischer Code berechnet grün/gelb/rot).
-6. **DE_BIAS_MAP**: Automatisierte Bereinigung diskriminierender Begriffe via JavaScript.
-7. **Repair-Kustos**: Versucht gelbe Begriffe formal zu reparieren (Singular, Kompositum, Brücke). Reparierte Begriffe werden grün.
-8. **GND-Abgleich (Retrieve-then-Judge)**: OpenSearch liefert 5 Kandidaten pro Begriff, LLM4 wählt den besten aus oder gibt no_match zurück. Concurrency 8.
-9. **Aggregation & Export**: Zusammenführung aller Stränge, Schreiben nach SeaTable, Statusaktualisierung.
-
----
-
-## 7. Potenzial für Weiterentwicklung
-
-* **Erweiterte Wörterbücher**: Ausbau der `DE_BIAS_MAP` zur Erkennung weiterer Diskriminierungsformen.
-* **Ollama-Integration**: Migration auf vollständig lokale Modelle für erhöhte Datensouveränität.
-* **Batch-Modus**: Parallele Verarbeitung mehrerer Objekte statt sequenziellem Single-Item-Picking.
-* **Feedback-Loop**: Rückspeisung manuell korrigierter Schlagworte zur Prompt-Optimierung.
+1. **Import & Splitting** — Abruf aus SeaTable, Single-Item-Picking
+2. **Caption A + B (parallel)** — Qwen + Gemma erstellen unabhängige visuelle Befunde
+3. **Synthese (LLM1b)** — Schiedsrichter konsolidiert, verwirft Halluzinationen, bereinigt Bias → `master_caption`
+4. **Tagging (LLM2)** — 11 Cluster, Schlagworte mit Begründung (`why`)
+5. **Fehlerklassen-Audit (LLM3)** — Klassifizierung statt Status; Code berechnet grün/gelb/rot deterministisch
+6. **DE_BIAS_MAP** — Automatisierte Bereinigung diskriminierender Begriffe via JavaScript
+7. **Repair-Kustos** — Gelbe Begriffe formal reparieren (Singular, Kompositum, Brücke)
+8. **GND-Abgleich (Retrieve-then-Judge)** — OpenSearch liefert 5 Kandidaten, LLM4 wählt aus
+9. **Aggregation & Export** — Zusammenführung, SeaTable-Export, Statusaktualisierung
 
 ---
 
-## 8. Anpassung (Customization)
+## 7. Einrichtung
 
-* **LLM-Endpunkt**: `YOUR_LLM_ENDPOINT` in den Workflow-JSONs durch eigenen Endpunkt ersetzen.
-* **Analyse-Fokus**: Anpassung des System-Prompts in `01a_caption_parallel.md` ändert die Bildbeschreibung.
-* **Klassifizierung**: Die 11 Cluster-Definitionen im Prompt `02_kustos_generator.md` sind modifizierbar.
-* **Audit-Regeln**: Erweiterung des Fehlerklassen-Katalogs im Prompt `04_senior_auditor.md`.
-* **Bias-Filter**: Die `DE_BIAS_MAP` im Node `Parse_LLM3_and_Debias` (Tagging_Sub.json) ist erweiterbar.
-* **SeaTable-Spalten**: Spaltennamen sind in den n8n-Nodes konfigurierbar; Vorlage in `templates/`.
+### Schnellstart
+
+1. **Workflows importieren**: Die drei JSON-Dateien aus `workflows/` in n8n importieren
+2. **Platzhalter ersetzen**: `YOUR_LLM_ENDPOINT`, `YOUR_API_KEY`, `YOUR_SEATABLE_CREDENTIAL_ID` in den Workflows anpassen
+3. **SeaTable aufsetzen**: Tabellen via CSV-Templates anlegen — Anleitung in `docs/setup_seatable.md`
+4. **GND-Daten laden**: Sachbegriffe-Dump von der DNB herunterladen und in OpenSearch indexieren
+5. **Modelle herunterladen**: GGUF-Dateien auf den GPU-Server laden — alle Links in `docs/stack_setup.md`
+
+### Anpassung
+
+* **LLM-Endpunkt** — `YOUR_LLM_ENDPOINT` in den Workflow-JSONs durch eigenen Endpunkt ersetzen
+* **Analyse-Fokus** — System-Prompt in `01a_caption_parallel.md` anpassen
+* **Klassifizierung** — 11 Cluster-Definitionen in `02_kustos_generator.md` modifizieren
+* **Audit-Regeln** — Fehlerklassen-Katalog in `04_senior_auditor.md` erweitern
+* **Bias-Filter** — `DE_BIAS_MAP` im Node `Parse_LLM3_and_Debias` (Tagging_Sub.json) ergänzen
+
+---
+
+## 8. Potenzial für Weiterentwicklung
+
+* **One-Click-Deployment** — Docker Compose Paket für Hetzner + Scaleway in Arbeit
+* **Batch-Modus** — Parallele Verarbeitung mehrerer Objekte (setzt mehr VRAM als L40S voraus)
+* **Monitoring** — Einbau von Langfuse (LLM-Tracing) und Grafana (Infrastruktur-Metriken)
+* **Feedback-Loop** — Rückspeisung manuell korrigierter Schlagworte zur Prompt-Optimierung
+* **DE_BIAS_MAP erweitern** — Ausbau auf ~800–1.200 Terme aus maschinenlesbaren Quellen (DE-BIAS/Europeana, Words Matter, Hurtlex, HateCheck u. a.) mit Dreischicht-Architektur: harte Ersetzung → Kontextualisierung → Flagging
+* **Weitere Normdaten** — Integration von AAT (Getty), LCSH oder Wikidata
+
+---
+
+## 9. Lizenz
+
+MIT License — siehe `LICENSE`
