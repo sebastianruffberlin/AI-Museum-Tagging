@@ -9,9 +9,26 @@
 
 Dieses Projekt stellt eine **Middleware** für Museen bereit. Sie dient der automatisierten Transformation historischer Objektdaten in eine zeitgemäße, barrierearme und ethisch geprüfte Sprache.
 
-Der Prozess basiert auf einer **„Chain of Verification"**: Daten durchlaufen eine Sequenz spezialisierter LLM-Instanzen (Analyse, Generierung, Audit), um eine gegenseitige Validierung zu gewährleisten. Das System liefert eine Verschlagwortung, die sowohl **GND-konform** (Gemeinsame Normdatei) als auch nach dem **Folksonomie-Prinzip** (nutzerorientiert) aufgebaut ist.
+Das Stadtmuseum Berlin verwaltet 4,5 Millionen Objekte aus 40 Teilsammlungen. Die Dokumentation dieser Objekte ist über Generationen von Museolog:innen gewachsen — sie ist oft undurchsichtig, voller Fachjargon, und für Nicht-Expert:innen kaum durchsuchbar. Dieses System macht diese Sammlung für die breite Öffentlichkeit auffindbar.
 
-Das System ist vollständig **self-hosted und Open Source** — keine kommerziellen API-Dienste, keine Daten-Weitergabe an Dritte.
+### Unser Ansatz: 40 Teilsammlungen, aber nur ein Workflow
+
+Das System ist bewusst auf **Standardisierung** ausgelegt:
+
+* **Eine Zielgruppe** — Nicht-Expert:innen, keine Sammlungsspezifik
+* **Ein Modell-Stack** — kein Finetuning, keine sammlungsspezifischen Anpassungen
+* **Ein Metadatenschema** — keine Spezialfelder
+* **Eine Normdatenquelle** — (erstmals) nur GND
+
+**Konsistenz** wird erreicht durch:
+
+* Definierte ethische Guardrails (Decolonial Middleware)
+* Museologische Regeln kodifiziert in 11 Clustern — das Erfahrungswissen langjähriger Erschließungsarbeit und geltender Museumsstandards
+* Begründungspflicht (`why`-Feld) in jedem Schritt — kein Schlagwort ohne belegbare Evidenz
+* LLM as a Judge — eine separate Prüfinstanz validiert jeden generierten Begriff
+* JSON-Schema als strukturierter Output — maschinell weiterverarbeitbar
+
+Der Prozess basiert auf einer **„Chain of Verification"**: Daten durchlaufen eine Sequenz spezialisierter LLM-Instanzen (Bildanalyse, Generierung, Audit, GND-Abgleich), die sich gegenseitig validieren. Das System ist vollständig **self-hosted und Open Source** — keine Cloud-APIs, keine Daten-Weitergabe an Dritte.
 
 ---
 
@@ -50,15 +67,14 @@ Beide Server kommunizieren über HTTPS. Der Inferenz-Endpunkt ist per Firewall a
 
 Alle Modelle laufen lokal als GGUF via llama.cpp. Kein Cloud-API-Zugriff erforderlich.
 
-| Modell | Quant | Größe | Aufgabe im Workflow | HuggingFace |
-| :--- | :--- | :--- | :--- | :--- |
-| **Qwen3.6-35B-A3B** | UD-Q6_K_XL | 29.6 GB | Caption A (parallel) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF) |
-| **Gemma-4-31B-it** | UD-Q4_K_XL | 18 GB | Caption B + Synthese (LLM1b) + Audit (LLM3) | [unsloth](https://huggingface.co/unsloth/gemma-4-31B-it-GGUF) |
-| **Qwen3.6-27B-MTP** | UD-Q6_K_XL | 24.2 GB | Tagging / Schlagwort-Generator (LLM2) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF) |
-| **Gemma-4-12B-QAT** | — | — | Repair-Kustos | lokal |
-| **Qwen3.6-35B-A3B-MTP** | UD-Q6_K_XL | 30.3 GB | GND-Abgleich (LLM4, Concurrency 8) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF) |
-
-Vollständige Modell-Dokumentation inkl. llama-swap Flags und Download-Links: `docs/stack_setup.md`
+| Workflow-ID | Vollname | Quant | Größe | Aufgabe | HuggingFace |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `qwen3.6-35b-a3b-mtp-q4` | Qwen3.6-35B-A3B-MTP | UD-Q4_K_XL | 22 GB + 861 MB | Caption A (Phase 1a, parallel) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF) |
+| `gemma-4-26b-a4b-qat` | Gemma-4-26B-A4B-it-QAT | UD-Q4_K_XL | 14 GB + 1.2 GB | Caption B (Phase 1a, parallel) | [unsloth](https://huggingface.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF) |
+| `gemma-4-12b-qat` | Gemma-4-12B-it-QAT | UD-Q4_K_XL | 6.3 GB + 168 MB | Synthese LLM1b (Phase 1b) + Repair (Phase 3b) | [unsloth](https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF) |
+| `qwen3.6-27b-mtp` | Qwen3.6-27B-MTP | UD-Q6_K_XL | 25 GB + 889 MB | Tagging LLM2 (Phase 2) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF) |
+| `gemma-4-31b-it` | Gemma-4-31B-it | UD-Q4_K_XL | 18 GB + 1.2 GB | Audit LLM3 (Phase 4) | [unsloth](https://huggingface.co/unsloth/gemma-4-31B-it-GGUF) |
+| `qwen3.6-35b-mtp` | Qwen3.6-35B-A3B-MTP | UD-Q6_K_XL | 31 GB + 861 MB | GND-Abgleich LLM4 (Phase 5, np 4) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF) |
 
 ---
 
