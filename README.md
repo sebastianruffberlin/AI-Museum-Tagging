@@ -1,6 +1,6 @@
 # AI Museum Tagger: Dokumentation
 
-> **Version: 2.0 | Stand: 24.Juni 2026**
+> **Version: 2.0 | Stand: 24. Juni 2026**
 > Änderungen gegenüber v1.0: Caption-Pipeline auf parallele Dual-Model-Architektur mit Synthese-Schiedsrichter umgestellt, neuer Repair-Schritt für gelbe Begriffe, LLM3 wechselt von Triage zu Fehlerklassen-System, GND-Abgleich von AI-Agent auf Retrieve-then-Judge umgestellt, alle Modelle von Gemini auf vollständig lokale Open-Source-Modelle (Qwen/Gemma) migriert.
 
 ---
@@ -76,6 +76,8 @@ Alle Modelle laufen lokal als GGUF via llama.cpp. Kein Cloud-API-Zugriff erforde
 | `gemma-4-31b-it` | Gemma-4-31B-it | UD-Q4_K_XL | 18 GB + 1.2 GB | Audit LLM3 (Phase 4) | [unsloth](https://huggingface.co/unsloth/gemma-4-31B-it-GGUF) |
 | `qwen3.6-35b-mtp` | Qwen3.6-35B-A3B-MTP | UD-Q6_K_XL | 31 GB + 861 MB | GND-Abgleich LLM4 (Phase 5, np 4) | [unsloth](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF) |
 
+Vollständige Modell-Dokumentation inkl. llama-swap Flags und Download-Links: `docs/stack_setup.md`
+
 ---
 
 ## 3. Kosten & Geschwindigkeit
@@ -89,7 +91,7 @@ Das System läuft auf einem Scaleway L40S GPU-Server (On-Demand, Pay-per-Minute)
 | 100 € Budget | ~68 Stunden | ~20.400 Schlagworte |
 | 1.000 Objekte | ~100 Stunden | ~147 € |
 
-*Basierend auf Scaleway L40S Serverpreisen und gemessener Inferenz-Geschwindigkeit des Stacks, Stand: Juni 2026.*
+*Basierend auf Scaleway L40S Serverpreisen und gemessener Inferenz-Geschwindigkeit des Stacks, Stand: 24. Juni 2026.*
 
 ---
 
@@ -198,21 +200,54 @@ Detaillierte Anleitungen zum Import und zur Konfiguration: `docs/setup_seatable.
 
 ## 7. Einrichtung
 
-### Schnellstart
+Dieses Repository kann auf drei Ebenen genutzt werden — je nach vorhandener Infrastruktur:
 
-1. **Workflows importieren**: Die drei JSON-Dateien aus `workflows/` in n8n importieren
-2. **Platzhalter ersetzen**: `YOUR_LLM_ENDPOINT`, `YOUR_API_KEY`, `YOUR_SEATABLE_CREDENTIAL_ID` in den Workflows anpassen
-3. **SeaTable aufsetzen**: Tabellen via CSV-Templates anlegen — Anleitung in `docs/setup_seatable.md`
-4. **GND-Daten laden**: Sachbegriffe-Dump von der DNB herunterladen und in OpenSearch indexieren
-5. **Modelle herunterladen**: GGUF-Dateien auf den GPU-Server laden — alle Links in `docs/stack_setup.md`
+---
+
+### Option 1: Nur die Prompts verwenden
+
+Die System-Prompts in `prompts/` sind unabhängig vom restlichen Stack nutzbar. Sie funktionieren mit jedem OpenAI-kompatiblen LLM-Endpunkt (OpenRouter, OpenAI, lokale Modelle).
+
+1. Prompt-Dateien aus `prompts/` herunterladen
+2. System-Prompts in eigene LLM-Calls oder Agenten-Frameworks einbinden
+3. Die 11 Cluster-Definitionen und Audit-Logik sind vollständig dokumentiert
+
+---
+
+### Option 2: n8n-Workflows mit eigenem Server
+
+Die Workflow-JSONs aus `workflows/` sind sofort importierbar und funktionieren mit jedem OpenAI-kompatiblen Endpunkt — egal ob Cloud-API oder eigener Server.
+
+1. SeaTable aufsetzen und Tabellen via CSV-Templates anlegen → `docs/setup_seatable.md`
+2. Die drei JSON-Dateien in n8n importieren (`Tagging_Main.json`, `Tagging_Sub.json`, `Tagging_GND.json`)
+3. Platzhalter in den Workflows ersetzen:
+   - `YOUR_LLM_ENDPOINT` → eigener LLM-Endpunkt
+   - `YOUR_API_KEY` → eigener API-Key
+   - `YOUR_SEATABLE_CREDENTIAL_ID` → SeaTable API-Token
+4. GND-Sachbegriffe in OpenSearch indexieren (Dump der DNB, Import-Script liegt bei)
+
+---
+
+### Option 3: Vollständigen Stack nachbauen
+
+Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann gemäß `docs/stack_setup.md` nachgebaut werden. Das ist die empfohlene Option für Museen die Datensouveränität und volle Kontrolle wollen.
+
+1. `docs/stack_setup.md` lesen — alle Versionen, Configs und Modell-Links sind dokumentiert
+2. Hetzner-Server aufsetzen (n8n, SeaTable, OpenSearch, Caddy)
+3. Scaleway GPU-Server aufsetzen (llama-swap, LiteLLM, Caddy)
+4. Modelle herunterladen und in `/opt/ki-inferenz/models/` ablegen
+5. Firewall konfigurieren: Inferenz-Endpunkt nur von Hetzner-IP erreichbar
+6. Workflows importieren und Platzhalter ersetzen
+
+---
 
 ### Anpassung
 
-* **LLM-Endpunkt** — `YOUR_LLM_ENDPOINT` in den Workflow-JSONs durch eigenen Endpunkt ersetzen
 * **Analyse-Fokus** — System-Prompt in `01a_caption_parallel.md` anpassen
 * **Klassifizierung** — 11 Cluster-Definitionen in `02_kustos_generator.md` modifizieren
 * **Audit-Regeln** — Fehlerklassen-Katalog in `04_senior_auditor.md` erweitern
 * **Bias-Filter** — `DE_BIAS_MAP` im Node `Parse_LLM3_and_Debias` (Tagging_Sub.json) ergänzen
+* **SeaTable-Spalten** — Spaltennamen sind in den n8n-Nodes konfigurierbar; Vorlage in `templates/`
 
 ---
 
