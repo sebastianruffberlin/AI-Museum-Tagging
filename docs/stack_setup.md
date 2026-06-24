@@ -1,6 +1,6 @@
 # Stack Setup: Infrastruktur-Dokumentation
 
-> **Version: 2.0 | Stand: 24.Juni 2026**
+> **Version: 2.0 | Stand: 24. Juni 2026**
 > Zwei-Server-Setup: Hetzner (Orchestrierung) + Scaleway L40S (KI-Inferenz).
 > Alle Dienste laufen als Docker-Container. Keine Cloud-APIs, keine Daten-Weitergabe.
 
@@ -40,9 +40,9 @@
 
 **Subdomains (Strato DNS):**
 * `n8n.YOUR_DOMAIN` → Hetzner (Caddy)
-* `llm.YOUR_DOMAIN` → Scaleway (Caddy, nur von Hetzner-IP erreichbar)
-* `chat.YOUR_DOMAIN` → Scaleway (Open WebUI, öffentlich)
-* `ner.YOUR_DOMAIN` → Scaleway (GLiNER2, nur von Hetzner-IP erreichbar)
+* `lcpp-gpu.YOUR_DOMAIN` → Scaleway (Caddy, nur von Hetzner-IP erreichbar)
+* `chat-gpu.YOUR_DOMAIN` → Scaleway (Open WebUI, öffentlich)
+* `glider2.YOUR_DOMAIN` → Scaleway (GLiNER2, nur von Hetzner-IP erreichbar)
 
 ---
 
@@ -55,7 +55,7 @@
 * **Disk:** 80 GB NVMe lokal
 * **OS:** Ubuntu 24.04.4 LTS (Kernel 6.8.0)
 
-### Software-Versionen (Stand: Juni 2026)
+### Software-Versionen (Stand: 24. Juni 2026)
 * **Docker:** `29.6.0`, Compose `v5.2.0`
 * **n8n:** `2.27.4`
 * **SeaTable Enterprise:** `6.1.8` + MariaDB `11.4.3-noble` + Redis `7.2.7-bookworm`
@@ -153,7 +153,7 @@ Führt aus: Ubuntu-Update → Docker Compose Pull & Up (beide Stacks) → SQLite
 * **Disk:** 465 GB SSD (Modelle: `/opt/ki-inferenz/models/`, ~329 GB belegt)
 * **OS:** Ubuntu 24.04.4 LTS (Kernel 6.8.0-124), Scaleway GPU OS 13
 
-### Software-Versionen (Stand: Juni 2026)
+### Software-Versionen (Stand: 24. Juni 2026)
 * **Docker:** `29.6.0`, Compose `v5.2.0`
 * **NVIDIA Driver:** `580.159.03`
 * **CUDA:** `13.0`
@@ -207,13 +207,13 @@ caddy:
   # Caddyfile: /root/caddy/Caddyfile
 
 gliner2:
-  # NER-Service, erreichbar unter ner.YOUR_DOMAIN
+  # NER-Service, erreichbar unter glider2.YOUR_DOMAIN
 ```
 
 ### Firewall (Caddy)
 
 ```
-llm.YOUR_DOMAIN {
+lcpp-gpu.YOUR_DOMAIN {
     @blocked not remote_ip YOUR_HETZNER_IP
     respond @blocked "Access Denied" 403
     reverse_proxy litellm:4000
