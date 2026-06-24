@@ -156,6 +156,12 @@ SeaTable (metadata)
 ├── docs/                   # Technische Dokumentation
 │   ├── setup_seatable.md          # SeaTable Tabellen & Import
 │   └── stack_setup.md             # Server-Setup: Hetzner + Scaleway
+├── deploy/                 # Setup-Skripte für den vollständigen Stack
+│   ├── README.md                  # Schritt-für-Schritt Anleitung
+│   ├── .env.example               # Konfigurationsvorlage
+│   ├── setup_hetzner.sh           # Automatisiertes Setup Orchestrierungs-Server
+│   ├── setup_scaleway.sh          # Automatisiertes Setup GPU-Inferenz-Server
+│   └── import_gnd.py              # GND-Sachbegriffe → OpenSearch
 └── README.md
 ```
 
@@ -222,14 +228,15 @@ Die Workflow-JSONs funktionieren mit jedem OpenAI-kompatiblen Endpunkt — egal 
 
 ### Option 3 — Vollständigen Stack nachbauen
 
-Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann gemäß `docs/stack_setup.md` nachgebaut werden. Empfohlen für Museen die Datensouveränität und volle Kontrolle wollen.
+Der komplette Zwei-Server-Stack (Hetzner + Scaleway) kann mit den Setup-Skripten im `deploy/` Ordner aufgebaut werden. Empfohlen für Museen die Datensouveränität und volle Kontrolle wollen.
 
-1. `docs/stack_setup.md` lesen — alle Versionen, Configs und Modell-Links dokumentiert
-2. Hetzner-Server aufsetzen (n8n, SeaTable, OpenSearch, Caddy)
-3. Scaleway GPU-Server aufsetzen (llama-swap, LiteLLM, Caddy)
-4. Modelle herunterladen und in `/opt/ki-inferenz/models/` ablegen
-5. Firewall konfigurieren: Inferenz-Endpunkt nur von Orchestrierungs-Server erreichbar
-6. Workflows importieren und Platzhalter ersetzen
+1. `deploy/README.md` lesen — Voraussetzungen und Schritt-für-Schritt Anleitung
+2. `deploy/.env.example` zu `deploy/.env` kopieren und ausfüllen
+3. `deploy/setup_hetzner.sh` auf dem Orchestrierungs-Server ausführen
+4. `deploy/setup_scaleway.sh` auf dem GPU-Server ausführen (inkl. Modell-Downloads ~118 GB)
+5. Workflows importieren und Platzhalter ersetzen
+
+Detaillierte Dokumentation aller Komponenten: `docs/stack_setup.md`
 
 ### Anpassung
 
