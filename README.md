@@ -2,7 +2,7 @@
 
 # 🏛️ AI Museum Tagger
 
-### Automatisierte, dekoloniale Verschlagwortung von Museumsobjekten
+### Automatisierte Verschlagwortung von Museumsobjekten
 ### via lokaler KI — open source, self-hosted, datensouverän
 
 [![License: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
